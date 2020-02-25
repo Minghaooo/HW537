@@ -1,0 +1,148 @@
+starting build
+
+**********************************************************************
+
+Test build
+build xv6 using make
+
+**********************************************************************
+Trying to build project using make
+make
+make: 'runtests' is up to date.
+
+
+test build FAILED
+ (build xv6 using make)
+ required file 'xv6.img' does not exist after make
+ required file 'fs.img' does not exist after make
+
+starting test1
+
+**********************************************************************
+
+Test test1
+call getfilenum() test test, value > 0
+
+**********************************************************************
+Running xv6 user progam /afs/cs.wisc.edu/p/course/cs537-shivaram/tests/p1b/ctests/test1.c
+IOError: [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+
+test test1 FAILED (0 of 1)
+ (call getfilenum() test test, value > 0)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+starting test2
+
+**********************************************************************
+
+Test test2
+call getfilenum() twice, sleep(50) between
+
+**********************************************************************
+Running xv6 user progam /afs/cs.wisc.edu/p/course/cs537-shivaram/tests/p1b/ctests/test2.c
+IOError: [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+
+test test2 FAILED (0 of 1)
+ (call getfilenum() twice, sleep(50) between)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+starting test3
+
+**********************************************************************
+
+Test test3
+called getfilenum() with 5 opens in between
+
+**********************************************************************
+Running xv6 user progam /afs/cs.wisc.edu/p/course/cs537-shivaram/tests/p1b/ctests/test3.c
+IOError: [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+
+test test3 FAILED (0 of 1)
+ (called getfilenum() with 5 opens in between)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+starting test4
+
+**********************************************************************
+
+Test test4
+called getfilenum() with max (13) opens in between
+
+**********************************************************************
+Running xv6 user progam /afs/cs.wisc.edu/p/course/cs537-shivaram/tests/p1b/ctests/test4.c
+IOError: [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+
+test test4 FAILED (0 of 1)
+ (called getfilenum() with max (13) opens in between)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+starting test5
+
+**********************************************************************
+
+Test test5
+called getfilenum() with opens and closes
+
+**********************************************************************
+Running xv6 user progam /afs/cs.wisc.edu/p/course/cs537-shivaram/tests/p1b/ctests/test5.c
+IOError: [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+
+test test5 FAILED (0 of 1)
+ (called getfilenum() with opens and closes)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+starting test6
+
+**********************************************************************
+
+Test test6
+called getfilenum() for a forked process
+
+**********************************************************************
+Running xv6 user progam /afs/cs.wisc.edu/p/course/cs537-shivaram/tests/p1b/ctests/test6.c
+IOError: [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+
+test test6 FAILED (0 of 1)
+ (called getfilenum() for a forked process)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+**********************************************************************
+Summary:
+test build FAILED
+ (build xv6 using make)
+ required file 'xv6.img' does not exist after make
+ required file 'fs.img' does not exist after make
+
+test test1 FAILED (0 of 1)
+ (call getfilenum() test test, value > 0)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+test test2 FAILED (0 of 1)
+ (call getfilenum() twice, sleep(50) between)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+test test3 FAILED (0 of 1)
+ (called getfilenum() with 5 opens in between)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+test test4 FAILED (0 of 1)
+ (called getfilenum() with max (13) opens in between)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+test test5 FAILED (0 of 1)
+ (called getfilenum() with opens and closes)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+test test6 FAILED (0 of 1)
+ (called getfilenum() for a forked process)
+ Unexpected exception [Errno 2] No such file or directory: '/tmp/tmpv5kaMj/p/user/tester.c'
+
+Passed 0 of 7 tests.
+Overall 0 of 7
+Points 0 of 6
