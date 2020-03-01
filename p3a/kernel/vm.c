@@ -55,8 +55,11 @@ walkpgdir(pde_t *pgdir, const void *va, int create)
   pde_t *pde;
   pte_t *pgtab;
 
+// use the 10 bit to find the page directory entry,
   pde = &pgdir[PDX(va)];
   if(*pde & PTE_P){
+    // if the pagedirectory is present, 
+    // use the next 10 bits of the virtual address to find the address of the PTE IN
     pgtab = (pte_t*)PTE_ADDR(*pde);
   } else {
     if(!create || (pgtab = (pte_t*)kalloc()) == 0)
@@ -77,14 +80,16 @@ walkpgdir(pde_t *pgdir, const void *va, int create)
 static int
 mappages(pde_t *pgdir, void *la, uint size, uint pa, int perm)
 {
+  // install mappings into a page table for a range of virtual address to 
+  // a corresponding range of PA
   char *a, *last;
   pte_t *pte;
   
   a = PGROUNDDOWN(la);
   last = PGROUNDDOWN(la + size - 1);
   for(;;){
-
-    pte = walkpgdir(pgdir, a, 1);  // to find the address
+  
+    pte = walkpgdir(pgdir, a, 1);
     if(pte == 0)
       return -1;
     if(*pte & PTE_P)
@@ -124,7 +129,9 @@ static struct kmap {
   void *p;
   void *e;
   int perm;
-} kmap[] = {
+} 
+
+kmap[] = {
   {(void*)USERTOP,    (void*)0x100000, PTE_W},  // I/O space
   {(void*)0x100000,   data,            0    },  // kernel text, rodata
   {data,              (void*)PHYSTOP,  PTE_W},  // kernel data, memory
@@ -137,14 +144,13 @@ setupkvm(void)
 {
   pde_t *pgdir;
   struct kmap *k;
-
-// allcoate a page of memory to hold the pagee directory
+//allocate a page of memory to hold the page directory 
   if((pgdir = (pde_t*)kalloc()) == 0)
     return 0;
   memset(pgdir, 0, PGSIZE);
-  // install the translation that kernal needs
   k = kmap;
   for(k = kmap; k < &kmap[NELEM(kmap)]; k++)
+  // install the translation the kernal needs
     if(mappages(pgdir, k->p, k->e - k->p, (uint)k->p, k->perm) < 0)
       return 0;
 
@@ -166,7 +172,7 @@ vmenable(void)
 // Switch h/w page table register to the kernel-only page table,
 // for when no process is running.
 void
-switchkvm(void)
+switchkvm(void) // tmh need it 
 {
   lcr3(PADDR(kpgdir));   // switch to the kernel page table
 }
@@ -213,7 +219,6 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
   if((uint)addr % PGSIZE != 0)
     panic("loaduvm: addr must be page aligned");
   for(i = 0; i < sz; i += PGSIZE){
-    // find the physical address
     if((pte = walkpgdir(pgdir, addr+i, 0)) == 0)
       panic("loaduvm: address should exist");
     pa = PTE_ADDR(*pte);
@@ -221,7 +226,6 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
       n = sz - i;
     else
       n = PGSIZE;
-      // read from the memory
     if(readi(ip, (char*)pa, offset+i, n) != n)
       return -1;
   }
@@ -312,17 +316,29 @@ copyuvm(pde_t *pgdir, uint sz)
   if((d = setupkvm()) == 0)
     return 0;
   for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walkpgdir(pgdir, (void*)i, 0)) == 0)
+    if((pte = walkpgdir(pgdir, (void*)i, 0)) == 0)  // make sure page is present
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P))
       panic("copyuvm: page not present");
-    pa = PTE_ADDR(*pte);
-    if((mem = kalloc()) == 0)
-      goto bad;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(d, (void*)i, PGSIZE, PADDR(mem), PTE_W|PTE_U) < 0)
-      goto bad;
-  }
+   // pa = PTE_ADDR_M(*pte);  // get physical address of parent's page
+  // cprintf("the pa is %d: ",*pte);
+     pa = PTE_ADDR(*pte);
+  // cprintf("the pa2 is %d: ", pa);
+   if ((mem = kalloc()) == 0)
+     goto bad;
+   memmove(mem, (char *)pa, PGSIZE);
+
+   if ((((uint)*pte) & 0x00000002) == 0x00000000)
+   {
+     if (mappages(d, (void *)i, PGSIZE, PADDR(mem), 0x000 | PTE_U) < 0)
+       goto bad;
+   }else
+   {
+     if (mappages(d, (void *)i, PGSIZE, PADDR(mem), PTE_W | PTE_U) < 0)
+       goto bad;
+   }
+   
+   }
   return d;
 
 bad:
@@ -370,12 +386,31 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
   return 0;
 }
 
-int mprotect_helper(void *addr, int len)
+int mprotect_helper(void *addr, int len){
+  pte_t * PA;
+  //pte_t  PPA;
+  pde_t *mpgdir;
+
+    mpgdir = proc->pgdir;
+    PA = walkpgdir(mpgdir, addr, 0);
+    *PA =  PADDR(*PA)&(0xfffffffd);
+ 
+   lcr3(rcr3());
+
+
+  return 0;
+}
+
+int munprotect_helper(void *addr, int len)
 {
-  cprintf("in the function mprotext_helper\n");
+  pte_t *PA;
+  pde_t *mpgdir;
 
-  //()()
+  mpgdir = proc->pgdir;
+  PA = walkpgdir(mpgdir, addr, 0);
+  *PA = PADDR(*PA) | (0x00000002);
 
-  // lcr3(PADDR());
+  lcr3(rcr3());
+
   return 0;
 }

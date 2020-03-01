@@ -55,10 +55,15 @@ walkpgdir(pde_t *pgdir, const void *va, int create)
   pde_t *pde;
   pte_t *pgtab;
 
-  pde = &pgdir[PDX(va)];
+  //indexing into pgdir
+  // use the first 10 bits to find the page directory entry
+  pde = &pgdir[PDX(va)]; 
+  
   if(*pde & PTE_P){
+    // if it is set, allocate it and put PA in the page directory
     pgtab = (pte_t*)PTE_ADDR(*pde);
   } else {
+    //if not present , it is not allocated
     if(!create || (pgtab = (pte_t*)kalloc()) == 0)
       return 0;
     // Make sure all those PTE_P bits are zero.
@@ -68,7 +73,11 @@ walkpgdir(pde_t *pgdir, const void *va, int create)
     // entries, if necessary.
     *pde = PADDR(pgtab) | PTE_P | PTE_W | PTE_U;
   }
+
+  // use the next 10 bit of the virtual address to find the address of PTE
   return &pgtab[PTX(va)];
+  //index twice, 1, index into the page dir, 2. index into the inter pagetable to get the 
+  //actual pagetable entry
 }
 
 // Create PTEs for linear addresses starting at la that refer to
@@ -80,15 +89,26 @@ mappages(pde_t *pgdir, void *la, uint size, uint pa, int perm)
   char *a, *last;
   pte_t *pte;
   
+  //get the page aligned address corresponding to LA
+  //if la = 0; then pagedown to 0x0
   a = PGROUNDDOWN(la);
   last = PGROUNDDOWN(la + size - 1);
   for(;;){
-    pte = walkpgdir(pgdir, a, 1);
+
+    // for each address to be mapped,
+    // find the address of PTE fo that address and initial it 
+    pte = walkpgdir(pgdir, a, 1);  
     if(pte == 0)
       return -1;
     if(*pte & PTE_P)
       panic("remap");
-    *pte = pa | perm | PTE_P;
+
+    //initial the PTE to hold the relevant physical page number
+    *pte = pa | perm | PTE_P; //most important line  
+    cprintf("pa: %d, perm: %d,PTE_P:%d ",pa, perm, PTE_P);
+    // fill in the PTE with 
+    //pa | permit bit | present_bit
+    // print pa , perm 
     if(a == last)
       break;
     a += PGSIZE;
@@ -180,7 +200,8 @@ switchuvm(struct proc *p)
   ltr(SEG_TSS << 3);
   if(p->pgdir == 0)
     panic("switchuvm: no pgdir");
-  lcr3(PADDR(p->pgdir));  // switch to new address space
+  lcr3(PADDR(p->pgdir));  // switch to new address space//clear tlb and flush entries
+  // switch from one to another, 
   popcli();
 }
 
@@ -245,6 +266,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       return 0;
     }
     memset(mem, 0, PGSIZE);
+    //map the virtual address to the physical address
     mappages(pgdir, (char*)a, PGSIZE, PADDR(mem), PTE_W|PTE_U);
   }
   return newsz;
