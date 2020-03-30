@@ -4,7 +4,6 @@
 #include <string.h>
 #include "mapreduce.h"
 
-
 //1. map, produce a set of intermediate key/value pairs
 
 //2. Mapreduce library groups all intermediate values with the same intermediate key 
@@ -23,6 +22,8 @@ void Map(char *file_name) // each invocation of map() is handed one filename and
         char *token, *dummy = line;
         while ((token = strsep(&dummy, " \t\n\r")) != NULL)
         {
+           // printf(token);
+           // printf("\n");
             MR_EmitToCombiner(token, "1");
         }
     }
@@ -47,7 +48,10 @@ void Combine(char *key, CombinerGetter get_next)
     {
         count++; // Emmited Map values are "1"s
     }
-    MR_EmitToReducer(key, itoa(count));
+    char buffer[5] ;
+     sprintf(buffer,"%d",count);
+   // MR_EmitToReducer(key, itoa(count));// windows
+    MR_EmitToReducer(key, buffer); // in linux 
 }
 
 
@@ -68,6 +72,6 @@ void Reduce(char *key, ReduceGetter get_next, int partition_number)
 
 int main(int argc, char *argv[])
 {
-    MR_Run(argc, argv, Map, 10, Reduce, 10, Combine, MR_DefaultHashPartition);
+    MR_Run(argc, argv, Map, 2, Reduce, 10, Combine, MR_DefaultHashPartition);
 
 }
