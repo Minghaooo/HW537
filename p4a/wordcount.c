@@ -9,21 +9,19 @@
 //2. Mapreduce library groups all intermediate values with the same intermediate key 
 //and passes them to Reduce()
 
-void Map(char *file_name) // each invocation of map() is handed one filename and 
+void Map(char *file_name)
 {
+    printf("this is the beginning of map\n");
     FILE *fp = fopen(file_name, "r");
     assert(fp != NULL);
 
     char *line = NULL;
     size_t size = 0;
-    // read a line  from the the file 
     while (getline(&line, &size, fp) != -1)
     {
         char *token, *dummy = line;
         while ((token = strsep(&dummy, " \t\n\r")) != NULL)
         {
-           // printf(token);
-           // printf("\n");
             MR_EmitToCombiner(token, "1");
         }
     }
@@ -40,38 +38,58 @@ void Map(char *file_name) // each invocation of map() is handed one filename and
 // it executed as many times as the number of unique keys that map() produce
 
 // combine, merge data from a single map(). and reducer merge from mulitple mappers.
-void Combine(char *key, CombinerGetter get_next)
+
+void Combine(char *key, CombineGetter get_next)
 {
+
+    printf("now in the combiner: \n" );
     int count = 0;
     char *value;
-    while ((value = get_next(key)) != NULL)
+
+    while ((value = get_next(key)) != NULL) // return the value
     {
         count++; // Emmited Map values are "1"s
+        printf("count %d\n", count);
     }
-    char buffer[5] ;
-     sprintf(buffer,"%d",count);
-   // MR_EmitToReducer(key, itoa(count));// windows
-    MR_EmitToReducer(key, buffer); // in linux 
-}
+    // Convert integer (count) to string (value)
+    printf("count finish\n ");
 
+    value = (char *)malloc(10 * sizeof(char));
+    sprintf(value, "%d", count);
+    printf("hello001\n");
+    MR_EmitToReducer(key, value);
+
+    free(value);
+
+    printf("mapper finish\n");
+}
 
 // invoked once per intermediate key
 
-void Reduce(char *key, ReduceGetter get_next, int partition_number)
+void Reduce(char *key, ReduceStateGetter get_state,
+            ReduceGetter get_next, int partition_number)
 {
+    // `get_state` is only being used for "eager mode" (explained later)
+    assert(get_state == NULL);
+
     int count = 0;
+
     char *value;
     while ((value = get_next(key, partition_number)) != NULL)
     {
         count += atoi(value);
     }
-    printf("%s %d\n", key, count);
+
+    // Convert integer (count) to string (value)
+    value = (char *)malloc(10 * sizeof(char));
+    sprintf(value, "%d", count);
+
+    printf("%s %s\n", key, value);
+    free(value);
 }
-
-
 
 int main(int argc, char *argv[])
 {
-    MR_Run(argc, argv, Map, 2, Reduce, 10, Combine, MR_DefaultHashPartition);
+    MR_Run(argc, argv, Map, 1, Reduce, 10, Combine, MR_DefaultHashPartition);
 
 }
