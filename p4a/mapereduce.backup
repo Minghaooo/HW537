@@ -9,9 +9,6 @@
 
 #define TABLE_SIZE 10 * 100
 #define HashPar 10
-
-
-
 //data structures
 /**
  * hash
@@ -43,11 +40,16 @@ struct reducer_t
     ReduceGetter getfun;
     char *arg;
     int partition_number;
-    int pid;
    // char *key, get_state, get_next, int partition_number
 };
 
-
+struct KeyMem_t
+{
+    char* key;
+    struct KeyNode_t *lastkey;
+    //ValueNode *Vnxt;
+    //struct Node *last;
+};
 
 struct KeyHead_t {
     //char* key;
@@ -86,15 +88,10 @@ typedef struct KeyMem_t keymen;
 typedef struct mapper_par_t map_par;
 typedef struct reducer_t    reduce_par;
 
-static HashMap *MAPMEM[10];
-static HashMap *REDUCERMEN[10];
-static HashMap *RESULTMEM;
-static Combiner MRcomb;
-static map_par *map_paramer;
-static reduce_par reduce_param[100];
-//TODO: init data structure
+    //TODO: init data structure
 
-void KeyNode_init(KeyNode *node)
+    void
+    KeyNode_init(KeyNode *node)
 {
     node->key = NULL;
     node->Knxt = NULL;
@@ -135,30 +132,22 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
  //   printf("============\n");
     KeyNode* Kcurrent;
     ValueNode* Vcurrent;
-    char* abc = malloc(30);
-    strcpy(abc, key);
-   //printf("abc is %s\n\n", abc);
-    
 
     // find the key;
     // if the list is empty
     if(khead->Knxt == NULL){
-     //   printf("000\n");
-     //   printf("insert to the first, key = %s, val = %s \n", key, value);
+    //    printf("insert to the first, key = %s, val = %s \n", key, value);
         KeyNode *Kpair = malloc(sizeof(KeyNode));
         ValueNode *Vpair = malloc(sizeof(ValueNode));
-        Vpair->value = malloc(sizeof(char*)*10);
 
         KeyNode_init(Kpair);
         ValueNode_init(Vpair);
-        Kpair->key = abc;
+        Kpair->key = key;
         Vpair->value = value;
 
         Kpair->Vnxt = Vpair;
       //  Kpair->Vend = Vpair;
         khead->Knxt = Kpair;
-       // printf("the insetred is %s, %s\n", Kpair->key, Kpair->Vnxt->value);
-      //  printf("the key is : %s, value is %s\n", MAPMEM[0]->hashlist[2]->Knxt->key, MAPMEM[0]->hashlist[2]->Knxt->Vnxt->value);
 
         return Kpair;
 
@@ -167,23 +156,22 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
     {
         Kcurrent=khead->Knxt;
 
-        if (strcmp(Kcurrent->key, key) == 0)  // ÏàÍ¬µÄkey
+        if (strcmp(Kcurrent->key, key) == 0)
         {
-          
 
             ValueNode *Vpair = malloc(sizeof(ValueNode));
             ValueNode_init(Vpair);
             Vpair->value = value;
             Vpair->V_nxt = Kcurrent->Vnxt;
             Kcurrent->Vnxt = Vpair;
+
             return Kcurrent;
         }
 
-        while (Kcurrent->Knxt != NULL) 
+        while (Kcurrent->Knxt != NULL)
         {
             // if the key exists
             if (strcmp(Kcurrent->key,key)==0) {
-            
 
                 ValueNode *Vpair = malloc(sizeof(ValueNode));
                 ValueNode_init(Vpair);
@@ -223,18 +211,26 @@ void free_Vnode(KeyNode* knode){
 }
 
 
-// combine getter
+static HashMap* MAPMEM[10];
+static HashMap* REDUCERMEN[100];
+static Combiner MRcomb;
+static keymen* keylast;
+static map_par *map_paramer;
+static reduce_par reduce_param;
+
+//ReduceGetter RedGetter( char * key, int partition_num);
 extern  char* GetterComb(char* key){
-    //printf("----getrun----- \n");
+  //  printf("----getrun----- \n");
     KeyNode * key_sel;
     key_sel = (KeyNode *)key;
 
     ValueNode *vsel;
     char * revalue;
     revalue = malloc(sizeof(ValueNode));
-
+    //printf("in the getter, value is %s\n", key);
 
     if (key_sel->Vnxt == NULL){
+     //   printf("* now it is empty, key is %s \n", key_sel->key);
         return NULL;
     }
     else
@@ -251,50 +247,13 @@ extern  char* GetterComb(char* key){
         
         revalue =  vsel->value;
         free (vsel);
+       // printf("* combiner get (key: %s, value:%s) \n", key_sel->key, revalue);
         return revalue;
     }
 
 }
 
-
-extern char* ReduceGetter_help(char *key, int partition_number){
-
-    unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
-
-    char *value;
-    value = (char *)malloc(10 * sizeof(char));
-    sprintf(value, "%d", 0);
-
-    KeyNode *Keyhelper = KeyNode_insert(RESULTMEM[0]->hashlist[hsn], key, value);
-
-    ValueNode *temp = Keyhelper->Knxt;
-
-    Keyhelper->Knxt = temp->V_nxt;
-    free(temp);
-
-    return Keyhelper->Vnxt->value;
-}
-
-// reduce getter
-extern char *ReduceStateGetter_help(char *key, int partition_number){
-
-    unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
-
-    char *value;
-    value = (char *)malloc(10 * sizeof(char));
-    sprintf(value, "%d", 0);
-
-    KeyNode *Keyhelper = KeyNode_insert(RESULTMEM->hashlist[hsn], key, value);
-
-    ValueNode *temp = Keyhelper->Knxt;
-
-    Keyhelper->Knxt = temp->V_nxt;
-    free(temp);
-
-    return Keyhelper->Vnxt->value;
-}
-
-//get_nxt function used to iterate over values that need to be merged
+    //get_nxt function used to iterate over values that need to be merged
 
 /**
  * @brief propogate data from a mapper to its respective combiner
@@ -303,9 +262,43 @@ extern char *ReduceStateGetter_help(char *key, int partition_number){
  */
 void MR_EmitToCombiner(char *key, char *value){
     unsigned long hsn = MR_DefaultHashPartition(key, 10);
-     // printf("key is %s,hash is %ld\n",key, hsn);
+    //printf("(%s,%s) hash:%ld \n",key, value, hsn);
+    //printf("in the main function :%s \n", MAPMEM->hashlist[0]->Knxt->key);
     KeyNode *keytree = KeyNode_insert(MAPMEM[0]->hashlist[hsn], key, value);
+   // printf("read from map: %s \n", MAPMEM[0]->hashlist[hsn]->Knxt->key);
 
+    if (strcmp(keylast->key , "0000")==0)
+    {
+        keylast->key = key;
+        keylast->lastkey = keytree;
+    }
+    else{
+
+        if(strcmp(keylast->key , key)!=0){
+
+            //keylast->key = key;
+            void *addr;
+
+            if (keylast->lastkey == NULL){
+                 addr = keytree;
+                }
+            else
+                {
+                addr = keylast->lastkey;
+                keylast->key = key;
+                keylast->lastkey = keytree;
+            }
+
+        Combiner combineself;
+        combineself = MRcomb;
+    //    printf("the keyword to be combined is %s",keylast->lastkey->key );
+        combineself(addr, GetterComb);
+        }
+   
+    }
+
+
+    //    printf("-----Emit to combiner-------\n");
 }
 
 
@@ -318,33 +311,27 @@ void MR_EmitToCombiner(char *key, char *value){
 void MR_EmitToReducer(char *key, char *value){
     KeyNode *key_sel;
     key_sel = (KeyNode *)key;
-    unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
-    KeyNode_insert(REDUCERMEN[0]->hashlist[hsn], key_sel->key, value);
-    printf("this is emit to reducer: (%s, %s), hash: %ld \n", REDUCERMEN[0]->hashlist[hsn]->Knxt->key, REDUCERMEN[0]->hashlist[hsn]->Knxt->Vnxt->value, hsn);
-    //  printf("----emit to reduce finish------\n");
+
+    ValueNode *Vcomb;
+    Vcomb = malloc(sizeof(ValueNode));
+    ValueNode_init(Vcomb);
+
+  //  printf("value is %s\n", value);
+    Vcomb->value = value;
+    key_sel->Vnxt = Vcomb;
+
+    unsigned long hsn = MR_DefaultHashPartition(key, 10);
+    KeyNode *abc = KeyNode_insert(REDUCERMEN[0]->hashlist[hsn], key_sel->key, key_sel->Vnxt->value);
+    printf("this is emit to reducer: (%s, %s) \n",key_sel->key, key_sel->Vnxt->value);
+    free(Vcomb);
+ //   printf(" -------------all finish----------------------\n");
+
 
 }
 
-
-//get merget result using REduce sate getter and sotre the partial result 
-// using ME_emitReducerState
 void MR_EmitReducerState(char *key, char *state, int partition_number){
-    unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
 
-    KeyNode *keyhelp =  KeyNode_insert(RESULTMEM->hashlist[hsn], key, state);
 
-    if(keyhelp->Vnxt->V_nxt != NULL){
-        ValueNode * vhelp;
-        vhelp = keyhelp->Vnxt->V_nxt;
-
-        while (vhelp->V_nxt != NULL){
-            ValueNode *abc;
-            abc = vhelp;
-            vhelp = abc->V_nxt;
-            free(abc);
-        }
-
-    }
 
 }
 
@@ -368,57 +355,22 @@ void * mapper_wrap(){
     Mapper map2 = map_paramer->Mapfun;
 
     map2(map_paramer->arg);
-   
-    KeyNode *keycurrent;
-    KeyNode *key_comb;
+    //clear the last key
+    void *addr;
+    addr = keylast->lastkey;
     Combiner combineself;
     combineself = MRcomb;
-
-    for (int i =0; i<10;i++)  // int partition number
-    {
-       
-        while (MAPMEM[0]->hashlist[i]->Knxt != NULL){
-
-            key_comb =  MAPMEM[0]->hashlist[i]->Knxt;
-            combineself((void *)key_comb, GetterComb);
-            if (key_comb->Knxt == NULL){
-                break;
-            }
-            else{
-                key_comb = key_comb->Knxt;
-
-            }
-        }
-    
-    }
+    printf("the keyword to be combined is %s", keylast->lastkey->key);
+    combineself(addr, GetterComb);
+ ////   
 }
 
-void *reducer_wrap( void *arg)
+void *reducer_wrap()
 {
-    reduce_par* argv = arg;
-
-    pthread_t a = pthread_self();
     ReduceStateGetter get_state;
     ReduceGetter get_next;
-    
-    //TODO: 
-    /**
-     * 1. go to sleep 
-     * 2. get signaled
-     * 3. find the ready key
-     * 4. remove it to final structure
-     * 5. jump to step 1
-     * 
-     * 6. all finih: 
-     * 7. 
-     * 
-     * 
-     * 
-     */
 
-    // 
-
-   // printf("reducer_warps %ld \n",a);//argv->pid);
+    printf("reducer_warps");
     // Reduce(char *key, get_state,get_next, int partition_number);
     
    
@@ -450,7 +402,10 @@ void MR_Run(int argc, char *argv[],
     pthread_t reduce_threads[num_reducers];//unsigned long int
 
         MRcomb = combine;
+        keylast = malloc(sizeof(keymen));
         map_paramer = malloc(sizeof(map_par));
+        keylast->key = "0000";
+        keylast->lastkey = NULL;
 
         for (int i=0; i<num_mappers;i++){
             MAPMEM[i] = malloc(sizeof(HashMap));   // the place to save the received data
@@ -458,46 +413,34 @@ void MR_Run(int argc, char *argv[],
         }
 
 // save the data so the sencond half can get access to if
-        for (int i = 0; i < num_mappers;i++)
+        for (int i = 0; i < num_mappers;    i++)
         {
-           REDUCERMEN[i] = malloc(sizeof(HashMap)); // reduce to map 
-           HashMap_init(REDUCERMEN[i]);
+            REDUCERMEN[i] = malloc(sizeof(HashMap)); // reduce to map 
+            HashMap_init(REDUCERMEN[i]);
         }
-
-        RESULTMEM = malloc(sizeof(HashMap)); // the final stage
-        HashMap_init(RESULTMEM);
-
-        //}
-        map_paramer->Mapfun = map;
+    //}
+    map_paramer->Mapfun = map;
         for (int i = 0; i < num_mappers; i++) {
             map_paramer->arg = argv[i+1];
             pthread_create(&map_threads[i], NULL, mapper_wrap, NULL);
         }
 
     // wait for threads to join;
-
          for (int i = 0; i < num_mappers ; i++){
              pthread_join(map_threads[i],NULL);
          }
 
+    reduce_param.reduce = reduce;
     //reduce_param
 
          for (int i = 0; i < num_mappers; i++){
-             reduce_param[i].reduce = reduce;
-             reduce_param[i].pid = i;
-                 ///map_paramer->arg = argv[i + 1];
-                 pthread_create(&reduce_threads[i], NULL, reducer_wrap,(void*) &(reduce_param[i]));
-                 printf("main %ld",reduce_threads[i] );
-         }
-
-         for (int i = 0; i < num_mappers; i++)
-         {
-             pthread_join(reduce_threads[i], NULL);
+             ///map_paramer->arg = argv[i + 1];
+             pthread_create(&reduce_threads[i], NULL, reducer_wrap, NULL);
          }
 
     for (int i = 0; i < num_mappers; i++)
     {
-       free (MAPMEM[i]); // the place to save the received data
+        free (MAPMEM[i]); // the place to save the received data
     }
 
   //  printf("     read from map: %s \n", MAPMEM[0]->hashlist[0]->Knxt->key);
@@ -514,5 +457,4 @@ void MR_Run(int argc, char *argv[],
     }
 
 */
-
 }
