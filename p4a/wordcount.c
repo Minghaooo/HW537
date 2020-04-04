@@ -49,7 +49,6 @@ void Combine(char *key, CombineGetter get_next)
     while ((value = get_next(key)) != NULL) // return the value
     {
         count++; // Emmited Map values are "1"s
-     // printf("count %d\n", count);
     }
 
     value = (char *)malloc(10 * sizeof(char));
@@ -57,19 +56,35 @@ void Combine(char *key, CombineGetter get_next)
 //    printf("hello001\n");
     MR_EmitToReducer(key, value);
     free(value);
-   //printf("mapper finish\n");
 }
 
 // invoked once per intermediate key
 
-// each thread is responsible for a set of keys that are assigned to it
+
+
+    // each thread is responsible for a set of keys that are assigned to it
+
 void Reduce(char *key, ReduceStateGetter get_state,
             ReduceGetter get_next, int partition_number)
 {
-    char *state = get_state(key, partition_number);
+    printf("reduce get key %s\n",key );
+
+    if(key == NULL)
+    return ;
+    
+      char *state = get_state(key, 10);
+
+    
+        printf("getstate finish (%s, %s)\n", key, state);
+
     int count = (state != NULL) ? atoi(state) : 0;
 
+     //   printf("the num is %d\n",count);
+
     char *value = get_next(key, partition_number);
+    printf("get_nxt finish (%s, %s)\n", key, value);
+
+    //printf("hello %s\n", value);
 
     if (value != NULL)
     {
@@ -77,18 +92,22 @@ void Reduce(char *key, ReduceStateGetter get_state,
         // Convert integer (count) to string (value)
         value = (char *)malloc(10 * sizeof(char));
         sprintf(value, "%d", count);
+       // printf("hello02 %s\n", value);
 
         MR_EmitReducerState(key, value, partition_number);
+
+       
         free(value);
     }
     else
     {
-        printf("%s %d\n", key, count);
+       
+        printf("%s %d\n\n", key, count);
     }
+    
 }
 
-int main(int argc, char *argv[])
+    int main(int argc, char *argv[])
 {
     MR_Run(argc, argv, Map, 1, Reduce, 1, Combine, MR_DefaultHashPartition);
-
 }

@@ -8,7 +8,7 @@
 #include "mapreduce.h"
 
 #define TABLE_SIZE 10 * 100
-#define HashPar 10
+#define HashPar 100
 
 
 
@@ -38,7 +38,7 @@ struct mapper_par_t
 };
 struct reducer_t
 {  
-    Reducer reduce;
+    Reducer reducefun;
     ReduceStateGetter getstate;
     ReduceGetter getfun;
     char *arg;
@@ -86,12 +86,20 @@ typedef struct KeyMem_t keymen;
 typedef struct mapper_par_t map_par;
 typedef struct reducer_t    reduce_par;
 
-static HashMap *MAPMEM[10];
-static HashMap *REDUCERMEN[10];
+static HashMap *MAPMEM[100];
+static HashMap *REDUCERMEN[100];
 static HashMap *RESULTMEM;
-static Combiner MRcomb;
 static map_par *map_paramer;
 static reduce_par reduce_param[100];
+
+static Reducer reducefun;
+static Combiner MRcomb;
+static ReduceGetter reducegetterfun;
+static ReduceStateGetter RStateGetterfun;
+static Mapper mapfun;
+
+
+
 //TODO: init data structure
 
 void KeyNode_init(KeyNode *node)
@@ -128,23 +136,88 @@ void HashMap_init(HashMap *hmp)
 
 }
 
+char * searchvalue(KeyHead *khead, char* key){
+
+    KeyNode * Kcurrent;
+    KeyNode *Klast;
+    KeyNode *Kfree;
+    ValueNode * Vcurrent;
+    char *value = malloc(20);
+
+    printf("search begin\n");
+    
+    Klast = NULL;
+
+    if(khead->Knxt == NULL)
+    return NULL;
+
+    Kcurrent = khead->Knxt;
+
+
+    if (Kcurrent->Knxt == NULL){
+        if (strcmp(Kcurrent->key, key)==0){
+            strcpy(value, Kcurrent->Vnxt->value);
+            khead->Knxt = Kcurrent->Knxt;
+            free(Kcurrent);
+            return value;
+        }
+        return NULL;
+    }
+
+while (Kcurrent->Knxt != NULL){
+      printf("search begin 01\n");
+     // Klast = Kcurrent;
+
+      if (strcmp(Kcurrent->key, key) == 0)
+      {
+          printf("search begin 02\n");
+          strcpy(value, Kcurrent->Vnxt->value);
+          if(Klast == NULL){
+              khead->Knxt =Kcurrent->Knxt;
+              Kfree = Kcurrent;
+              free(Kfree);
+            
+          }
+          else
+          {
+              Klast->Knxt = Kcurrent->Knxt;
+              Kfree = Kcurrent;
+               free(Kfree);
+          }
+          
+         
+          return value;
+    }
+    printf("search begin 03\n");
+    Klast = Kcurrent;
+
+    Kcurrent = Kcurrent->Knxt;
+}
+
+   // printf("search begin 06\n");
+
+    return NULL;
+}
+
 // first go through the list and find the key, then insert the value
 KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
-    //init 
+    
 
- //   printf("============\n");
+   printf("=====insert %s=======\n", key);
     KeyNode* Kcurrent;
     ValueNode* Vcurrent;
     char* abc = malloc(30);
+    char* num = malloc(10);
     strcpy(abc, key);
-   //printf("abc is %s\n\n", abc);
+    strcpy(num, value);
+    //printf("abc is %s\n\n", abc);
     
 
     // find the key;
     // if the list is empty
     if(khead->Knxt == NULL){
      //   printf("000\n");
-     //   printf("insert to the first, key = %s, val = %s \n", key, value);
+     //  printf("insert to the first, key = %s, val = %s \n", key, value);
         KeyNode *Kpair = malloc(sizeof(KeyNode));
         ValueNode *Vpair = malloc(sizeof(ValueNode));
         Vpair->value = malloc(sizeof(char*)*10);
@@ -152,7 +225,7 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
         KeyNode_init(Kpair);
         ValueNode_init(Vpair);
         Kpair->key = abc;
-        Vpair->value = value;
+        Vpair->value = num;
 
         Kpair->Vnxt = Vpair;
       //  Kpair->Vend = Vpair;
@@ -169,25 +242,26 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
 
         if (strcmp(Kcurrent->key, key) == 0)  // ÏàÍ¬µÄkey
         {
+         //   printf("have the same key %s, %s\n", Kcurrent->key, Kcurrent->Vnxt->value);
           
 
             ValueNode *Vpair = malloc(sizeof(ValueNode));
             ValueNode_init(Vpair);
-            Vpair->value = value;
+            Vpair->value = num;
             Vpair->V_nxt = Kcurrent->Vnxt;
             Kcurrent->Vnxt = Vpair;
             return Kcurrent;
         }
 
-        while (Kcurrent->Knxt != NULL) 
+        while (Kcurrent->Knxt != NULL) // no same key
         {
-            // if the key exists
+           // printf("key exist\n");
             if (strcmp(Kcurrent->key,key)==0) {
             
 
                 ValueNode *Vpair = malloc(sizeof(ValueNode));
                 ValueNode_init(Vpair);
-                Vpair->value = value;
+                Vpair->value = num;
                 Vpair->V_nxt = Kcurrent->Vnxt;
                 Kcurrent->Vnxt = Vpair;
 
@@ -199,16 +273,20 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
             }
         }
 
+       
+
         KeyNode *Kpair = malloc(sizeof(KeyNode));
         ValueNode *Vpair = malloc(sizeof(ValueNode));
         KeyNode_init(Kpair);
         ValueNode_init(Vpair);
-        Kpair->key = key;
-        Vpair->value = value;
+        Kpair->key = abc;
+        Vpair->value = num;
         Kpair->Vnxt = Vpair;
+       // printf("key exist2%s, %s\n", Kpair->key, Kpair->Vnxt->value);
 
         Kcurrent->Knxt = Kpair;
-     //   Kcurrent->Vend = Vpair;
+      //  printf("key node is %s, %s\n", Kcurrent->Knxt->key, Kcurrent->Vnxt->value);
+        //   Kcurrent->Vend = Vpair;
         return Kpair;
     }
 }
@@ -259,39 +337,58 @@ extern  char* GetterComb(char* key){
 
 extern char* ReduceGetter_help(char *key, int partition_number){
 
-    unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
+ //   printf("int the getter\n");
+    unsigned long hsn = MR_DefaultHashPartition(key, 10);
+    char* value;
+ //   printf("search start\n");
 
-    char *value;
-    value = (char *)malloc(10 * sizeof(char));
-    sprintf(value, "%d", 0);
+    value = searchvalue(RESULTMEM->hashlist[hsn], key);
+    printf(" getter return %s\n", value);
 
-    KeyNode *Keyhelper = KeyNode_insert(RESULTMEM[0]->hashlist[hsn], key, value);
-
-    ValueNode *temp = Keyhelper->Knxt;
-
-    Keyhelper->Knxt = temp->V_nxt;
-    free(temp);
-
-    return Keyhelper->Vnxt->value;
+    return value;
+    
 }
 
 // reduce getter
 extern char *ReduceStateGetter_help(char *key, int partition_number){
 
-    unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
+   unsigned long hsn = MR_DefaultHashPartition(key, 10);
 
-    char *value;
-    value = (char *)malloc(10 * sizeof(char));
-    sprintf(value, "%d", 0);
+   char *value;
 
-    KeyNode *Keyhelper = KeyNode_insert(RESULTMEM->hashlist[hsn], key, value);
+   value = searchvalue(REDUCERMEN[0]->hashlist[hsn], key);
+   printf("state return %s\n", value);
 
-    ValueNode *temp = Keyhelper->Knxt;
+   return value;
 
-    Keyhelper->Knxt = temp->V_nxt;
+   /*
+   value = searchvalue(REDUCERMEN[0]->hashlist[hsn], key);
+
+   return value;
+
+   value = (char *)malloc(10 * sizeof(char));
+   sprintf(value, "%d", 0);
+   KeyNode *Keyhelper = KeyNode_insert(REDUCERMEN[0]->hashlist[hsn], key, value);
+
+   if (Keyhelper == NULL){
+       printf("null");
+       return NULL;
+   }
+else
+{
+    ValueNode *temp = Keyhelper->Vnxt;
+
+    Keyhelper->Vnxt = temp->V_nxt;
+
     free(temp);
 
+  //  printf("state return (%s,%s) \n", Keyhelper->key, Keyhelper->Vnxt->value);
     return Keyhelper->Vnxt->value;
+    */
+
+
+
+  
 }
 
 //get_nxt function used to iterate over values that need to be merged
@@ -319,9 +416,11 @@ void MR_EmitToReducer(char *key, char *value){
     KeyNode *key_sel;
     key_sel = (KeyNode *)key;
     unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
+    printf("this is emit to reducer: (%s,%s), hash: %ld \n", key_sel->key, value, hsn) ;
     KeyNode_insert(REDUCERMEN[0]->hashlist[hsn], key_sel->key, value);
-    printf("this is emit to reducer: (%s, %s), hash: %ld \n", REDUCERMEN[0]->hashlist[hsn]->Knxt->key, REDUCERMEN[0]->hashlist[hsn]->Knxt->Vnxt->value, hsn);
-    //  printf("----emit to reduce finish------\n");
+    //printf("this is emit to reducer: (%s, %s), hash: %ld \n", REDUCERMEN[0]->hashlist[hsn]->Knxt->key, REDUCERMEN[0]->hashlist[hsn]->Knxt->Vnxt->value, hsn);
+    
+      printf("----emit to reduce finish------\n\n");
 
 }
 
@@ -329,10 +428,10 @@ void MR_EmitToReducer(char *key, char *value){
 //get merget result using REduce sate getter and sotre the partial result 
 // using ME_emitReducerState
 void MR_EmitReducerState(char *key, char *state, int partition_number){
-    unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
+    unsigned long hsn = MR_DefaultHashPartition(key, 10);
 
     KeyNode *keyhelp =  KeyNode_insert(RESULTMEM->hashlist[hsn], key, state);
-
+/*
     if(keyhelp->Vnxt->V_nxt != NULL){
         ValueNode * vhelp;
         vhelp = keyhelp->Vnxt->V_nxt;
@@ -343,9 +442,9 @@ void MR_EmitReducerState(char *key, char *state, int partition_number){
             vhelp = abc->V_nxt;
             free(abc);
         }
-
     }
-
+    */
+    
 }
 
 /**
@@ -365,44 +464,84 @@ unsigned long MR_DefaultHashPartition(char *key, int num_partitions){
 }
 
 void * mapper_wrap(){
-    Mapper map2 = map_paramer->Mapfun;
 
-    map2(map_paramer->arg);
-   
+    mapfun(map_paramer->arg);
+
     KeyNode *keycurrent;
     KeyNode *key_comb;
     Combiner combineself;
     combineself = MRcomb;
 
-    for (int i =0; i<10;i++)  // int partition number
+    for (int i =0; i<11;i++)  // int partition number
     {
-       
-        while (MAPMEM[0]->hashlist[i]->Knxt != NULL){
+        printf("i = %d\n", i);
+        if (MAPMEM[0]->hashlist[i]->Knxt != NULL){
 
-            key_comb =  MAPMEM[0]->hashlist[i]->Knxt;
+            key_comb = MAPMEM[0]->hashlist[i]->Knxt;
             combineself((void *)key_comb, GetterComb);
-            if (key_comb->Knxt == NULL){
-                break;
-            }
-            else{
+            while (key_comb->Knxt != NULL)
+            {
                 key_comb = key_comb->Knxt;
+
+                combineself((void *)key_comb, GetterComb);
+                printf("combine finish (%s)\n",key_comb->key );
 
             }
         }
-    
+
     }
+    printf("----------finish mapper--------\n");
 }
 
 void *reducer_wrap( void *arg)
 {
     reduce_par* argv = arg;
 
-    pthread_t a = pthread_self();
-    ReduceStateGetter get_state;
-    ReduceGetter get_next;
-    
-    //TODO: 
-    /**
+   // printf("before anything\n");
+
+    KeyNode *Kcurrent;
+   char *key;
+
+   pthread_t a = pthread_self();
+   ReduceStateGetter get_state;
+   ReduceGetter get_next;
+   get_state = ReduceStateGetter_help;
+
+   //printf("001 before anything\n");
+
+   //printf("          in the MEM the key is %s, value is %s\n", REDUCERMEN[0]->hashlist[2]->Knxt->key,
+   //       REDUCERMEN[0]->hashlist[2]->Knxt->Vnxt->value);
+
+   for (int i = 0; i < 11; i++)
+   {
+      
+       if (REDUCERMEN[0]->hashlist[i]->Knxt != NULL)
+       {
+           printf("\n Warp hash: %d\n", i);
+
+           Kcurrent = REDUCERMEN[0]->hashlist[i]->Knxt;
+           key = Kcurrent->key;
+         //  printf("002 before anything %s\n", key);
+           reducefun(key, ReduceStateGetter_help, ReduceGetter_help, 10);
+
+           while ((Kcurrent->Knxt != NULL))
+           {
+               key = Kcurrent->key;
+            //   printf("002 before anything %s\n", key);
+               reducefun(key, ReduceStateGetter_help, ReduceGetter_help, 10);
+               Kcurrent = Kcurrent->Knxt;
+           }
+       }
+
+    }
+
+   
+
+   // (*reducefun)(key,get_state,get_next, 10);
+  
+   // search REDUCERMEN
+   //TODO:
+   /**
      * 1. go to sleep 
      * 2. get signaled
      * 3. find the ready key
@@ -416,7 +555,7 @@ void *reducer_wrap( void *arg)
      * 
      */
 
-    // 
+   // 
 
    // printf("reducer_warps %ld \n",a);//argv->pid);
     // Reduce(char *key, get_state,get_next, int partition_number);
@@ -437,37 +576,35 @@ TODO:
  * @param mapper_args 
  * @return void* 
  */
-
-
-
 void MR_Run(int argc, char *argv[],
             Mapper map, int num_mappers,
             Reducer reduce, int num_reducers,
             Combiner combine,
             Partitioner partition){
 
+          //  reduce(NULL,NULL, NULL,10);
+
+    MRcomb = combine;
+    reducefun = reduce;
+    mapfun = map;
+
     pthread_t map_threads[num_mappers];//unsigned long int
     pthread_t reduce_threads[num_reducers];//unsigned long int
 
-        MRcomb = combine;
-        map_paramer = malloc(sizeof(map_par));
+    map_paramer = malloc(sizeof(map_par));
 
         for (int i=0; i<num_mappers;i++){
             MAPMEM[i] = malloc(sizeof(HashMap));   // the place to save the received data
             HashMap_init(MAPMEM[i]);
         }
-
-// save the data so the sencond half can get access to if
         for (int i = 0; i < num_mappers;i++)
         {
            REDUCERMEN[i] = malloc(sizeof(HashMap)); // reduce to map 
            HashMap_init(REDUCERMEN[i]);
         }
-
         RESULTMEM = malloc(sizeof(HashMap)); // the final stage
         HashMap_init(RESULTMEM);
 
-        //}
         map_paramer->Mapfun = map;
         for (int i = 0; i < num_mappers; i++) {
             map_paramer->arg = argv[i+1];
@@ -475,19 +612,25 @@ void MR_Run(int argc, char *argv[],
         }
 
     // wait for threads to join;
-
+        
          for (int i = 0; i < num_mappers ; i++){
              pthread_join(map_threads[i],NULL);
          }
 
-    //reduce_param
+      //   printf("          in the MEM the key is %s, value is %s\n", REDUCERMEN[0]->hashlist[8]->Knxt->Knxt->key,
+      //          REDUCERMEN[0]->hashlist[8]->Knxt->Knxt->Vnxt->value);
 
-         for (int i = 0; i < num_mappers; i++){
-             reduce_param[i].reduce = reduce;
+         //reduce_param
+         //  map_paramer->Mapfun =(void *) reduce;
+
+         //printf("(%s, %s),(%s, %s)",REDUCERMEN[0]->hashlist[])
+
+             for (int i = 0; i < num_mappers; i++)
+         {
              reduce_param[i].pid = i;
                  ///map_paramer->arg = argv[i + 1];
                  pthread_create(&reduce_threads[i], NULL, reducer_wrap,(void*) &(reduce_param[i]));
-                 printf("main %ld",reduce_threads[i] );
+                // printf("main %ld",reduce_threads[i] );
          }
 
          for (int i = 0; i < num_mappers; i++)
