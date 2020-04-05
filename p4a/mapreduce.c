@@ -7,8 +7,8 @@
 #include <semaphore.h>
 #include "mapreduce.h"
 
-#define TABLE_SIZE 10 * 100
-#define HashPar 100
+#define MaxHashPar 100
+#define MaxThreadSize 100
 
 
 
@@ -31,11 +31,17 @@
 // b) store combiners output to be accessed by reducers.
 
 // hashtable's chain list
+
+//pthread_mutex_lock(&hmp->HashMaplock);
+//pthread_mutex_unlock(&hmp->HashMaplock);
+//pthread_mutex_destroy(&hmp->HashMaplock);
 struct mapper_par_t
 {
     Mapper Mapfun;
     char *arg;
+    int pid;
 };
+
 struct reducer_t
 {  
     Reducer reducefun;
@@ -52,17 +58,15 @@ struct reducer_t
 struct KeyHead_t {
     //char* key;
    struct  KeyNode_t *Knxt;
-    //ValueNode *Vnxt;
-    //struct Node *last;
+   pthread_mutex_t HeaeLock;
+
 };
 
 struct KeyNode_t {
     char* key;
     struct KeyNode_t *Knxt;
     struct ValueNode_t *Vnxt;
-  //  struct ValueNode_t *Vend;
     int num;
-    //struct Node *last;
 };
 
 struct ValueNode_t
@@ -74,31 +78,65 @@ struct ValueNode_t
 // hash table
 struct HashMap_t
 {
-     struct KeyHead_t* hashlist[HashPar];
-    pid_t ProcessID;
+     struct KeyHead_t* hashlist[MaxHashPar];
+     int Pid_id;
+     int finish;
+     pthread_mutex_t HashMaplock;
 };
 
-typedef struct HashMap_t HashMap;
-typedef struct ValueNode_t ValueNode;
-typedef struct KeyHead_t KeyHead;
-typedef struct KeyNode_t KeyNode;
-typedef struct KeyMem_t keymen;
+
+typedef struct HashMap_t    HashMap;
+typedef struct ValueNode_t  ValueNode;
+typedef struct KeyHead_t    KeyHead;
+typedef struct KeyNode_t    KeyNode;
+typedef struct KeyMem_t     keymen;
 typedef struct mapper_par_t map_par;
 typedef struct reducer_t    reduce_par;
 
-static HashMap *MAPMEM[100];
-static HashMap *REDUCERMEN[100];
+static HashMap *MAPMEM[MaxThreadSize];
+static HashMap *REDUCERMEN[MaxThreadSize];
 static HashMap *RESULTMEM;
-static map_par *map_paramer;
-static reduce_par reduce_param[100];
 
-static Reducer reducefun;
-static Combiner MRcomb;
-static ReduceGetter reducegetterfun;
-static ReduceStateGetter RStateGetterfun;
-static Mapper mapfun;
+static map_par              map_paramer[MaxThreadSize];
+static reduce_par           reduce_param[MaxThreadSize];
 
+static Reducer              reducefun;
+static Mapper               mapfun;
+static Combiner             MRcomb;
+//static ReduceGetter         reducegetterfun;
+//static ReduceStateGetter    RStateGetterfun;
+static int                  PartitionNum;
 
+static int MapperNum;
+static int ReducerNum;
+int find_map_num(char *key, HashMap **hsp, int hsn);
+
+pthread_t Global_MAPthread[MaxThreadSize+1];
+pthread_t Global_Reducethread[MaxThreadSize + 1];
+
+int ReturnMynum(int type){
+pthread_t my_pid = pthread_self();
+if(type == 0){
+    for (int i = 0; i<MapperNum; i++)
+    { 
+        //printf("   the process id saved is %ld\n", Global_MAPthread[i]);
+        //if (pthread_equal(Global_MAPthread [i], my_pid)==0){
+       if (my_pid == Global_MAPthread[i]){
+            return i;
+       }
+    }
+}
+else
+
+{
+    for (int i = 0; Global_Reducethread [i + 1] == 0; i++)
+    {
+        if (my_pid == Global_Reducethread[i])
+            return i;
+    }
+}
+    return MaxThreadSize+100;
+}
 
 //TODO: init data structure
 
@@ -122,117 +160,185 @@ void KeyNode_init(KeyNode *node)
 void HashMap_init(HashMap *hmp)
 {   
     //KeyHead head[HashPar];
-    for(int i=0; i<HashPar; i++)
+    for(int i=0; i<MaxHashPar; i++)
     {
-        //head[i].Knxt = NULL;
-        //hmp->hashlist[i] = &head[i];
         KeyHead *head_test;
         head_test = malloc(sizeof(KeyHead));
-        head_test->Knxt = NULL;
+        head_test->Knxt = NULL; 
+        pthread_mutex_init(&head_test->HeaeLock, NULL);
         hmp->hashlist[i] = head_test;
+
+         
     }
 
-    hmp->ProcessID =0;
-
+        hmp->Pid_id = 99999;
+        hmp->finish =0;
+        pthread_mutex_init(&hmp->HashMaplock, NULL);
 }
 
-char * searchvalue(KeyHead *khead, char* key){
 
-    KeyNode * Kcurrent;
-    KeyNode *Klast;
-    KeyNode *Kfree;
-    ValueNode * Vcurrent;
+
+char *RetrunFirst(KeyHead *khead, char *key){
+    KeyNode *Kcurrent;
+    ValueNode *Vcurrent;
     char *value = malloc(20);
 
-    printf("search begin\n");
-    
-    Klast = NULL;
-
-    if(khead->Knxt == NULL)
-    return NULL;
+ //   printf("return first\n");
+    pthread_mutex_lock(&(khead->HeaeLock));
 
     Kcurrent = khead->Knxt;
 
-
-    if (Kcurrent->Knxt == NULL){
-        if (strcmp(Kcurrent->key, key)==0){
-            strcpy(value, Kcurrent->Vnxt->value);
-            khead->Knxt = Kcurrent->Knxt;
-            free(Kcurrent);
-            return value;
-        }
+    if(khead->Knxt==NULL){
+        pthread_mutex_unlock(&(khead->HeaeLock));
         return NULL;
     }
 
-while (Kcurrent->Knxt != NULL){
-      printf("search begin 01\n");
-     // Klast = Kcurrent;
 
-      if (strcmp(Kcurrent->key, key) == 0)
-      {
-          printf("search begin 02\n");
-          strcpy(value, Kcurrent->Vnxt->value);
-          if(Klast == NULL){
-              khead->Knxt =Kcurrent->Knxt;
-              Kfree = Kcurrent;
-              free(Kfree);
-            
-          }
-          else
-          {
-              Klast->Knxt = Kcurrent->Knxt;
-              Kfree = Kcurrent;
-               free(Kfree);
-          }
-          
-         
-          return value;
+    if (strcmp(Kcurrent->key, key)==0){
+        Vcurrent = Kcurrent->Vnxt;
+  //      printf("place 1 \n");
+        strcpy(value, Kcurrent->Vnxt->value);
+        if (Vcurrent->V_nxt == NULL){
+   //         printf("place 2 \n");
+            free(Vcurrent);
+            free(Kcurrent);
+            khead->Knxt =NULL;
+        }
+        else{
+ //           printf("place 3 \n");
+            Kcurrent->Vnxt = Vcurrent->V_nxt;
+            free(Vcurrent);
+        }
+        pthread_mutex_unlock(&(khead->HeaeLock));
+        return value;
+ //       printf("place 4 \n");
     }
-    printf("search begin 03\n");
-    Klast = Kcurrent;
-
-    Kcurrent = Kcurrent->Knxt;
-}
-
-   // printf("search begin 06\n");
-
+//   printf("place 5 \n");
+    pthread_mutex_unlock(&(khead->HeaeLock));
     return NULL;
 }
 
-// first go through the list and find the key, then insert the value
-KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
-    
+char *RetrunLater(KeyHead *khead, char *key){
+    KeyNode *Kcurrent;
+    //KeyNode *Klast;
+    ValueNode *Vcurrent;
 
-   printf("=====insert %s=======\n", key);
+    pthread_mutex_lock(&(khead->HeaeLock));
+
+    Kcurrent = khead->Knxt;
+    char *value = malloc(20);
+
+    if(khead->Knxt->Knxt == NULL){
+    pthread_mutex_unlock(&(khead->HeaeLock));
+    return NULL;
+    }
+
+   // Klast = Kcurrent;
+    Kcurrent = Kcurrent->Knxt;
+  //  printf("hello 001\n");
+    while(Kcurrent->Knxt!=NULL)
+    {
+   //     printf("hello 003\n");
+       if( strcmp(Kcurrent->key, key) != 0){
+        //   Klast = Kcurrent;
+           Kcurrent = Kcurrent->Knxt;
+       }
+       else{
+           strcpy(value, Kcurrent->Vnxt->value);
+           if(Kcurrent->Vnxt->V_nxt == NULL){
+               Vcurrent = Kcurrent->Vnxt;
+           //    Klast = Kcurrent->Knxt;
+               free(Kcurrent);
+               free(Vcurrent);
+               pthread_mutex_unlock(&(khead->HeaeLock));
+               return value;
+           }
+       }
+    }
+ //   printf("hello 002\n");
+    if(Kcurrent->Knxt == NULL){
+      
+
+        if (strcmp(Kcurrent->key, key) ==0)
+        {
+            strcpy(value, Kcurrent->Vnxt->value);
+            if (Kcurrent->Vnxt->V_nxt == NULL)
+            {
+                Vcurrent = Kcurrent->Vnxt;
+                free(Kcurrent);
+                free(Vcurrent);
+                pthread_mutex_unlock(&(khead->HeaeLock));
+                return value;
+            }
+            else
+            {
+                Vcurrent = Kcurrent->Vnxt;
+                Kcurrent->Vnxt = Vcurrent->V_nxt;
+                free(Vcurrent);
+                pthread_mutex_unlock(&(khead->HeaeLock));
+                return value;
+            }
+            
+        }
+    }
+    pthread_mutex_unlock(&(khead->HeaeLock));
+    return NULL;
+}
+
+char *searchvalue(KeyHead * khead, char *key)
+{
+//   printf("the hello 000  \n");
+    char * value;
+
+
+    pthread_mutex_lock(&khead->HeaeLock);
+    if(khead->Knxt==NULL){
+ //       printf("return NULL");
+    pthread_mutex_unlock(&khead->HeaeLock);
+        return NULL;
+    }
+
+
+    pthread_mutex_unlock(&khead->HeaeLock);
+ //   printf("the hello \n");
+    value = RetrunFirst(khead, key);
+ //   printf("the first%s\n", value);
+    if (value != NULL)
+        return value;
+ 
+
+    value = RetrunLater(khead, key);
+   // printf("the second %s\n", value);
+
+    return value;
+}
+KeyNode *KeyNode_insert(KeyHead *khead, char *key, char *value)
+{
+
+    // printf("=====insert %s=======\n", key);
     KeyNode* Kcurrent;
-    ValueNode* Vcurrent;
+    //ValueNode* Vcurrent;
     char* abc = malloc(30);
     char* num = malloc(10);
     strcpy(abc, key);
     strcpy(num, value);
     //printf("abc is %s\n\n", abc);
-    
+    pthread_mutex_lock(&khead->HeaeLock);
 
-    // find the key;
-    // if the list is empty
     if(khead->Knxt == NULL){
-     //   printf("000\n");
-     //  printf("insert to the first, key = %s, val = %s \n", key, value);
+   
         KeyNode *Kpair = malloc(sizeof(KeyNode));
         ValueNode *Vpair = malloc(sizeof(ValueNode));
         Vpair->value = malloc(sizeof(char*)*10);
-
         KeyNode_init(Kpair);
         ValueNode_init(Vpair);
         Kpair->key = abc;
         Vpair->value = num;
 
         Kpair->Vnxt = Vpair;
-      //  Kpair->Vend = Vpair;
+     
         khead->Knxt = Kpair;
-       // printf("the insetred is %s, %s\n", Kpair->key, Kpair->Vnxt->value);
-      //  printf("the key is : %s, value is %s\n", MAPMEM[0]->hashlist[2]->Knxt->key, MAPMEM[0]->hashlist[2]->Knxt->Vnxt->value);
-
+        pthread_mutex_unlock(&khead->HeaeLock);
         return Kpair;
 
     }
@@ -240,7 +346,7 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
     {
         Kcurrent=khead->Knxt;
 
-        if (strcmp(Kcurrent->key, key) == 0)  // ÏàÍ¬µÄkey
+        if (strcmp(Kcurrent->key, key) == 0)  // ???????key
         {
          //   printf("have the same key %s, %s\n", Kcurrent->key, Kcurrent->Vnxt->value);
           
@@ -250,6 +356,7 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
             Vpair->value = num;
             Vpair->V_nxt = Kcurrent->Vnxt;
             Kcurrent->Vnxt = Vpair;
+            pthread_mutex_unlock(&khead->HeaeLock);
             return Kcurrent;
         }
 
@@ -264,6 +371,7 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
                 Vpair->value = num;
                 Vpair->V_nxt = Kcurrent->Vnxt;
                 Kcurrent->Vnxt = Vpair;
+                pthread_mutex_unlock(&khead->HeaeLock);
 
                 return Kcurrent;
                 break;
@@ -272,8 +380,6 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
                 Kcurrent = Kcurrent->Knxt;
             }
         }
-
-       
 
         KeyNode *Kpair = malloc(sizeof(KeyNode));
         ValueNode *Vpair = malloc(sizeof(ValueNode));
@@ -287,8 +393,11 @@ KeyNode* KeyNode_insert(KeyHead *khead, char* key, char* value){
         Kcurrent->Knxt = Kpair;
       //  printf("key node is %s, %s\n", Kcurrent->Knxt->key, Kcurrent->Vnxt->value);
         //   Kcurrent->Vend = Vpair;
+       pthread_mutex_unlock(&khead->HeaeLock);
         return Kpair;
     }
+    pthread_mutex_unlock(&khead->HeaeLock);
+    return NULL;
 }
 
 void free_Vnode(KeyNode* knode){
@@ -340,55 +449,76 @@ extern char* ReduceGetter_help(char *key, int partition_number){
  //   printf("int the getter\n");
     unsigned long hsn = MR_DefaultHashPartition(key, 10);
     char* value;
- //   printf("search start\n");
+   
+  //  pthread_mutex_lock(&RESULTMEM->hashlist[hsn]->HeaeLock);
+    int a = find_map_num(key, REDUCERMEN, hsn);
+    if(a== 99)
+    return NULL;
+    
+    if(REDUCERMEN[a]->hashlist[hsn] ==NULL){
+       // printf("hsn nULL\n");
+    }
 
-    value = searchvalue(RESULTMEM->hashlist[hsn], key);
-    printf(" getter return %s\n", value);
-
+    value = searchvalue(REDUCERMEN[a]->hashlist[hsn], key);
+  //  printf("search finish\n");
     return value;
+    
+}
+
+int find_map_num(char *key, HashMap **hsp, int hsn ){
+   KeyNode *Kcurrent;
+   //printf("\n lxy in Warp pid: , %s,\n", REDUCERMEN[1]->hashlist[0]->Knxt->Vnxt->value);
+
+   for (int i = 0; i < MapperNum; i++)
+   {
+
+       if (REDUCERMEN[i]->hashlist[hsn]->Knxt != NULL)
+       {
+    
+           if( strcmp(key, REDUCERMEN[i]->hashlist[hsn]->Knxt->key)==0)
+           {
+               return i;
+        
+
+           }else
+           {
+              
+               Kcurrent = REDUCERMEN[i]->hashlist[hsn]->Knxt ;
+              // Kcurrent = Kcurrent->Knxt;
+              if(Kcurrent ==NULL){
+              
+              }    
+
+               while (Kcurrent->Knxt != NULL){
+
+
+                   if (strcmp(key, Kcurrent->Knxt->key))
+                    {
+                       return i;
+                    }
+                    Kcurrent = Kcurrent->Knxt;
+                }
+            }
+    }
+   }
+    return 99;
     
 }
 
 // reduce getter
 extern char *ReduceStateGetter_help(char *key, int partition_number){
+    
+  //  printf("in reduce state getter to find , %s\n",key);
 
-   unsigned long hsn = MR_DefaultHashPartition(key, 10);
+    
+    unsigned long hsn = MR_DefaultHashPartition(key, partition_number);
+  // printf("in reduce state getter to find , %s, %ld\n", key, hsn);
 
-   char *value;
-
-   value = searchvalue(REDUCERMEN[0]->hashlist[hsn], key);
-   printf("state return %s\n", value);
-
-   return value;
-
-   /*
-   value = searchvalue(REDUCERMEN[0]->hashlist[hsn], key);
-
-   return value;
-
-   value = (char *)malloc(10 * sizeof(char));
-   sprintf(value, "%d", 0);
-   KeyNode *Keyhelper = KeyNode_insert(REDUCERMEN[0]->hashlist[hsn], key, value);
-
-   if (Keyhelper == NULL){
-       printf("null");
-       return NULL;
-   }
-else
-{
-    ValueNode *temp = Keyhelper->Vnxt;
-
-    Keyhelper->Vnxt = temp->V_nxt;
-
-    free(temp);
-
-  //  printf("state return (%s,%s) \n", Keyhelper->key, Keyhelper->Vnxt->value);
-    return Keyhelper->Vnxt->value;
-    */
+    char *value;
+    value = searchvalue(RESULTMEM->hashlist[hsn], key);
 
 
-
-  
+    return value;
 }
 
 //get_nxt function used to iterate over values that need to be merged
@@ -399,9 +529,10 @@ else
  * and temporarily store them so that combine()can retrive and merge its values for each key
  */
 void MR_EmitToCombiner(char *key, char *value){
+
+    int i = ReturnMynum(0);
     unsigned long hsn = MR_DefaultHashPartition(key, 10);
-     // printf("key is %s,hash is %ld\n",key, hsn);
-    KeyNode *keytree = KeyNode_insert(MAPMEM[0]->hashlist[hsn], key, value);
+     KeyNode_insert(MAPMEM[i]->hashlist[hsn], key, value);
 
 }
 
@@ -415,12 +546,12 @@ void MR_EmitToCombiner(char *key, char *value){
 void MR_EmitToReducer(char *key, char *value){
     KeyNode *key_sel;
     key_sel = (KeyNode *)key;
+    int i = ReturnMynum(0);
     unsigned long hsn = MR_DefaultHashPartition(key_sel->key, 10);
-    printf("this is emit to reducer: (%s,%s), hash: %ld \n", key_sel->key, value, hsn) ;
-    KeyNode_insert(REDUCERMEN[0]->hashlist[hsn], key_sel->key, value);
+    //printf("this is emit to reducer: (%s,%s), hash: %ld \n", key_sel->key, value, hsn) ;
+    KeyNode_insert(REDUCERMEN[i]->hashlist[hsn], key_sel->key, value);
     //printf("this is emit to reducer: (%s, %s), hash: %ld \n", REDUCERMEN[0]->hashlist[hsn]->Knxt->key, REDUCERMEN[0]->hashlist[hsn]->Knxt->Vnxt->value, hsn);
-    
-      printf("----emit to reduce finish------\n\n");
+  // printf("----emit to reduce finish------\n\n");
 
 }
 
@@ -429,22 +560,12 @@ void MR_EmitToReducer(char *key, char *value){
 // using ME_emitReducerState
 void MR_EmitReducerState(char *key, char *state, int partition_number){
     unsigned long hsn = MR_DefaultHashPartition(key, 10);
+  //  printf("emit redce state\n");
 
-    KeyNode *keyhelp =  KeyNode_insert(RESULTMEM->hashlist[hsn], key, state);
-/*
-    if(keyhelp->Vnxt->V_nxt != NULL){
-        ValueNode * vhelp;
-        vhelp = keyhelp->Vnxt->V_nxt;
-
-        while (vhelp->V_nxt != NULL){
-            ValueNode *abc;
-            abc = vhelp;
-            vhelp = abc->V_nxt;
-            free(abc);
-        }
-    }
-    */
-    
+    //pthread_mutex_lock(&RESULTMEM->hashlist[hsn]->HeaeLock);
+     KeyNode_insert(RESULTMEM->hashlist[hsn], key, state);
+   // pthread_mutex_unlock(&RESULTMEM->hashlist[hsn]->HeaeLock);
+ //   printf(" -- place state \n");
 }
 
 /**
@@ -463,81 +584,178 @@ unsigned long MR_DefaultHashPartition(char *key, int num_partitions){
     return hash%num_partitions;
 }
 
-void * mapper_wrap(){
+void *mapper_wrap(void *arg)
+{
 
-    mapfun(map_paramer->arg);
+    
+    map_par * map_arg;
+    map_arg = arg;
 
-    KeyNode *keycurrent;
+   // int p = ReturnMynum(0);
+  //  printf("the thread is  %ld\n", Global_MAPthread[1]);
+ //   printf("the file received is %s, in thread %d\n", map_arg->arg, p);
+    //pthread_t a = pthread_self();
+
+   // printf("%ld\n", a);
+    mapfun(map_arg->arg);
+    //KeyNode *keycurrent;
     KeyNode *key_comb;
     Combiner combineself;
     combineself = MRcomb;
 
+
     for (int i =0; i<11;i++)  // int partition number
     {
-        printf("i = %d\n", i);
-        if (MAPMEM[0]->hashlist[i]->Knxt != NULL){
+       
+        if (MAPMEM[map_arg->pid]->hashlist[i]->Knxt != NULL){
+       //     printf("i = %d\n", i);
 
-            key_comb = MAPMEM[0]->hashlist[i]->Knxt;
+            key_comb = MAPMEM[map_arg->pid]->hashlist[i]->Knxt;
             combineself((void *)key_comb, GetterComb);
             while (key_comb->Knxt != NULL)
             {
                 key_comb = key_comb->Knxt;
 
                 combineself((void *)key_comb, GetterComb);
-                printf("combine finish (%s)\n",key_comb->key );
+       //         printf("combine finish (%s)\n",key_comb->key );
 
             }
         }
 
     }
-    printf("----------finish mapper--------\n");
+    MAPMEM[map_arg->pid]->finish =1;
+
+ //   printf("----------finish mapper--------\n");
+return NULL;
+}
+
+//pthread_mutex_lock(&hmp->HashMaplock);
+//pthread_mutex_unlock(&hmp->HashMaplock);
+//pthread_mutex_destroy(&hmp->HashMaplock);
+/**
+ * search different 
+ * 
+ * @param arg 
+ * @return void* 
+ */
+void *reducer_stage0(void *arg){
+    reduce_par *argv = arg;
+
+    //  printf("----reduce start-------\n");
+   // printf("  -------  reduce start %d\n", argv->pid);
+    KeyNode *Kcurrent;
+    char *key;
+
+    int hashnum;
+
+    //pthread_t a = pthread_self();
+    //ReduceStateGetter get_state;
+    //ReduceGetter get_next;
+   // get_state = ReduceStateGetter_help;
+
+    for (int i = 0; i < MapperNum; i++)
+    {
+        for (int j = 0; j < PartitionNum; j++)
+        {
+            hashnum = j % ReducerNum;
+
+              
+
+            if (hashnum == argv->pid)
+            {
+                //   fflush(stdout);
+                //  pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+                pthread_mutex_lock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+
+                if (REDUCERMEN[i]->hashlist[j]->Knxt != NULL)
+                {
+                    Kcurrent = REDUCERMEN[i]->hashlist[j]->Knxt;
+                    key = Kcurrent->key;
+                    //printf("j num is %d, pid is, %d, key\n", hashnum, argv->pid);
+                    pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+                    reducefun(key, ReduceStateGetter_help, ReduceGetter_help, PartitionNum);
+                    pthread_mutex_lock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+
+                    while ((Kcurrent->Knxt != NULL))
+                    {
+                        key = Kcurrent->key;
+                        pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+                        reducefun(key, ReduceStateGetter_help, ReduceGetter_help, 10);
+                        pthread_mutex_lock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+                        Kcurrent = Kcurrent->Knxt;
+                    }
+                    pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+                }
+                pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+            }
+        }
+    }
+    return NULL;
+}
+void reducer_stage2(void *arg){
+    reduce_par *argv = arg;
+
+    //  printf("----reduce start-------\n");
+//   printf("  -------  reduce start %d\n", argv->pid);
+    KeyNode *Kcurrent;
+    char *key;
+
+    int hashnum;
+
+    //pthread_t a = pthread_self();
+    //ReduceStateGetter get_state;
+    //ReduceGetter get_next;
+   // get_state = ReduceStateGetter_help;
+
+    for (int i = 0; i < MapperNum; i++){
+        for (int j = 0; j < PartitionNum; j++)
+        {
+            hashnum = (j % ReducerNum) ;
+
+             
+            if (hashnum == argv->pid)
+            {
+               // printf("hasn num is %d, pid is %d, j is %d\n", hashnum, argv->pid, j);
+
+                //   fflush(stdout);
+                //  pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
+                pthread_mutex_lock(&RESULTMEM->hashlist[j]->HeaeLock);
+
+                if (RESULTMEM->hashlist[j]->Knxt != NULL)
+                {
+                    //printf("hello\n");
+                    Kcurrent = RESULTMEM->hashlist[j]->Knxt;
+                    key = Kcurrent->key;
+                 //   printf("key is %s\n", key);
+                    pthread_mutex_unlock(&RESULTMEM->hashlist[j]->HeaeLock);
+                    reducefun(key, ReduceStateGetter_help, ReduceGetter_help, PartitionNum);
+                    pthread_mutex_lock(&RESULTMEM->hashlist[j]->HeaeLock);
+
+                    while ((Kcurrent->Knxt != NULL))
+                    {
+                        key = Kcurrent->key;
+                        pthread_mutex_unlock(&RESULTMEM->hashlist[j]->HeaeLock);
+                        reducefun(key, ReduceStateGetter_help, ReduceGetter_help, 10);
+                     //   printf("key is %s\n", key);
+                        pthread_mutex_lock(&RESULTMEM->hashlist[j]->HeaeLock);
+                        Kcurrent = Kcurrent->Knxt;
+                    }
+                    pthread_mutex_unlock(&RESULTMEM->hashlist[j]->HeaeLock);
+                }
+              //  printf("hello 2\n");
+                pthread_mutex_unlock(&RESULTMEM->hashlist[j]->HeaeLock);
+            }
+        }
+        }
+
 }
 
 void *reducer_wrap( void *arg)
 {
-    reduce_par* argv = arg;
-
-   // printf("before anything\n");
-
-    KeyNode *Kcurrent;
-   char *key;
-
-   pthread_t a = pthread_self();
-   ReduceStateGetter get_state;
-   ReduceGetter get_next;
-   get_state = ReduceStateGetter_help;
-
-   //printf("001 before anything\n");
-
-   //printf("          in the MEM the key is %s, value is %s\n", REDUCERMEN[0]->hashlist[2]->Knxt->key,
-   //       REDUCERMEN[0]->hashlist[2]->Knxt->Vnxt->value);
-
-   for (int i = 0; i < 11; i++)
-   {
-      
-       if (REDUCERMEN[0]->hashlist[i]->Knxt != NULL)
-       {
-           printf("\n Warp hash: %d\n", i);
-
-           Kcurrent = REDUCERMEN[0]->hashlist[i]->Knxt;
-           key = Kcurrent->key;
-         //  printf("002 before anything %s\n", key);
-           reducefun(key, ReduceStateGetter_help, ReduceGetter_help, 10);
-
-           while ((Kcurrent->Knxt != NULL))
-           {
-               key = Kcurrent->key;
-            //   printf("002 before anything %s\n", key);
-               reducefun(key, ReduceStateGetter_help, ReduceGetter_help, 10);
-               Kcurrent = Kcurrent->Knxt;
-           }
-       }
-
-    }
-
-   
-
-   // (*reducefun)(key,get_state,get_next, 10);
+  reducer_stage0(arg);
+  reducer_stage2(arg);
+  return NULL;
+}
   
    // search REDUCERMEN
    //TODO:
@@ -555,13 +773,7 @@ void *reducer_wrap( void *arg)
      * 
      */
 
-   // 
-
-   // printf("reducer_warps %ld \n",a);//argv->pid);
-    // Reduce(char *key, get_state,get_next, int partition_number);
     
-   
-}
 /*
 TODO:
  step0: create data sturcture to hold intermediate data
@@ -582,80 +794,69 @@ void MR_Run(int argc, char *argv[],
             Combiner combine,
             Partitioner partition){
 
-          //  reduce(NULL,NULL, NULL,10);
+    PartitionNum = 10;
+    //  reduce(NULL,NULL, NULL,10);
+    MapperNum = num_mappers;
+    ReducerNum = num_reducers;
 
     MRcomb = combine;
     reducefun = reduce;
     mapfun = map;
 
-    pthread_t map_threads[num_mappers];//unsigned long int
-    pthread_t reduce_threads[num_reducers];//unsigned long int
 
-    map_paramer = malloc(sizeof(map_par));
 
+
+    //initial MAMMEM and REDUCEMEN
         for (int i=0; i<num_mappers;i++){
+
             MAPMEM[i] = malloc(sizeof(HashMap));   // the place to save the received data
             HashMap_init(MAPMEM[i]);
-        }
-        for (int i = 0; i < num_mappers;i++)
-        {
-           REDUCERMEN[i] = malloc(sizeof(HashMap)); // reduce to map 
-           HashMap_init(REDUCERMEN[i]);
-        }
-        RESULTMEM = malloc(sizeof(HashMap)); // the final stage
-        HashMap_init(RESULTMEM);
 
-        map_paramer->Mapfun = map;
-        for (int i = 0; i < num_mappers; i++) {
-            map_paramer->arg = argv[i+1];
-            pthread_create(&map_threads[i], NULL, mapper_wrap, NULL);
+            REDUCERMEN[i] = malloc(sizeof(HashMap)); // reduce to map
+            HashMap_init(REDUCERMEN[i]);
         }
+    // the final place to put     
+            RESULTMEM = malloc(sizeof(HashMap)); // the final stage
+            HashMap_init(RESULTMEM);
+
+    /// start creating threads
+
+       
+        for (int i = 0; i < num_mappers; i++) {
+            map_paramer[i].pid=i;
+            map_paramer[i].arg = argv[i+1];
+            pthread_create(&Global_MAPthread[i], NULL, mapper_wrap,(void*)&(map_paramer[i]));
+    }
 
     // wait for threads to join;
         
          for (int i = 0; i < num_mappers ; i++){
-             pthread_join(map_threads[i],NULL);
+             pthread_join(Global_MAPthread[i],NULL);
          }
 
-      //   printf("          in the MEM the key is %s, value is %s\n", REDUCERMEN[0]->hashlist[8]->Knxt->Knxt->key,
-      //          REDUCERMEN[0]->hashlist[8]->Knxt->Knxt->Vnxt->value);
 
-         //reduce_param
-         //  map_paramer->Mapfun =(void *) reduce;
-
-         //printf("(%s, %s),(%s, %s)",REDUCERMEN[0]->hashlist[])
-
-             for (int i = 0; i < num_mappers; i++)
+        for (int i = 0; i < ReducerNum; i++)
          {
-             reduce_param[i].pid = i;
-                 ///map_paramer->arg = argv[i + 1];
-                 pthread_create(&reduce_threads[i], NULL, reducer_wrap,(void*) &(reduce_param[i]));
-                // printf("main %ld",reduce_threads[i] );
+                 reduce_param[i].pid = i;
+             //    printf("pid nun should be:%d\n",i);
+               
+                pthread_create(&Global_Reducethread[i], NULL, reducer_wrap,(void*) &(reduce_param[i]));     
          }
 
-         for (int i = 0; i < num_mappers; i++)
+
+        for (int i = 0; i < ReducerNum; i++)
          {
-             pthread_join(reduce_threads[i], NULL);
+             pthread_join(Global_Reducethread[i], NULL);
          }
 
-    for (int i = 0; i < num_mappers; i++)
-    {
-       free (MAPMEM[i]); // the place to save the received data
-    }
+        for (int i = 0; i < num_mappers; i++)
+        {
+           // pthread_mutex_destroy(&);
+            free (MAPMEM[i]); // free the place to save the received data
+            free(REDUCERMEN[i]);
+        }
 
-  //  printf("     read from map: %s \n", MAPMEM[0]->hashlist[0]->Knxt->key);
-   // printf("     read from value: %s \n", MAPMEM[0]->hashlist[0]->Knxt->Vend->value);
+         free(RESULTMEM);
 
-    //printf("read from map: %d \n", MAPMEM[0]->hashlist[0]->Knxt->sum);
-
-    /*
-    for (int i = 0; i < num_mappers; i++)
-    {
-        //  mapper_args = argv[i+1];
-        //   pthread_create(&map_threads[i],NULL,mapper_wrapper,argv[i+1]);
-        pthread_create(&map_threads[i], NULL, (void *)map, argv[i + 1]);
-    }
-
-*/
-
+  
 }
