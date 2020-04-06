@@ -200,9 +200,10 @@ char *RetrunFirst(KeyHead *khead, char *key){
         strcpy(value, Kcurrent->Vnxt->value);
         if (Vcurrent->V_nxt == NULL){
    //         printf("place 2 \n");
+             khead->Knxt =NULL;
             free(Vcurrent);
             free(Kcurrent);
-            khead->Knxt =NULL;
+           
         }
         else{
  //           printf("place 3 \n");
@@ -220,7 +221,7 @@ char *RetrunFirst(KeyHead *khead, char *key){
 
 char *RetrunLater(KeyHead *khead, char *key){
     KeyNode *Kcurrent;
-    //KeyNode *Klast;
+    KeyNode *Klast;
     ValueNode *Vcurrent;
 
     pthread_mutex_lock(&(khead->HeaeLock));
@@ -233,29 +234,30 @@ char *RetrunLater(KeyHead *khead, char *key){
     return NULL;
     }
 
-   // Klast = Kcurrent;
+    Klast = Kcurrent;
     Kcurrent = Kcurrent->Knxt;
-  //  printf("hello 001\n");
+    printf("hello 001\n");
     while(Kcurrent->Knxt!=NULL)
     {
-   //     printf("hello 003\n");
+        printf("hello 003\n");
        if( strcmp(Kcurrent->key, key) != 0){
-        //   Klast = Kcurrent;
+           Klast = Kcurrent;
            Kcurrent = Kcurrent->Knxt;
        }
        else{
            strcpy(value, Kcurrent->Vnxt->value);
            if(Kcurrent->Vnxt->V_nxt == NULL){
                Vcurrent = Kcurrent->Vnxt;
-           //    Klast = Kcurrent->Knxt;
+               Klast->Knxt = NULL;
                free(Kcurrent);
                free(Vcurrent);
                pthread_mutex_unlock(&(khead->HeaeLock));
                return value;
            }
+           
        }
     }
- //   printf("hello 002\n");
+    printf("hello 002\n");
     if(Kcurrent->Knxt == NULL){
       
 
@@ -265,6 +267,7 @@ char *RetrunLater(KeyHead *khead, char *key){
             if (Kcurrent->Vnxt->V_nxt == NULL)
             {
                 Vcurrent = Kcurrent->Vnxt;
+                Klast->Knxt = NULL;
                 free(Kcurrent);
                 free(Vcurrent);
                 pthread_mutex_unlock(&(khead->HeaeLock));
@@ -644,6 +647,7 @@ void *reducer_stage0(void *arg){
     //  printf("----reduce start-------\n");
    // printf("  -------  reduce start %d\n", argv->pid);
     KeyNode *Kcurrent;
+    KeyNode *Klast;
     char *key;
 
     int hashnum;
@@ -670,19 +674,37 @@ void *reducer_stage0(void *arg){
                 if (REDUCERMEN[i]->hashlist[j]->Knxt != NULL)
                 {
                     Kcurrent = REDUCERMEN[i]->hashlist[j]->Knxt;
+                    Klast = REDUCERMEN[i]->hashlist[j]->Knxt;
                     key = Kcurrent->key;
                     //printf("j num is %d, pid is, %d, key\n", hashnum, argv->pid);
                     pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
                     reducefun(key, ReduceStateGetter_help, ReduceGetter_help, PartitionNum);
                     pthread_mutex_lock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
 
+                    if (REDUCERMEN[i]->hashlist[j]->Knxt!=NULL){
                     while ((Kcurrent->Knxt != NULL))
                     {
+                        
                         key = Kcurrent->key;
                         pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
                         reducefun(key, ReduceStateGetter_help, ReduceGetter_help, 10);
                         pthread_mutex_lock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
-                        Kcurrent = Kcurrent->Knxt;
+                         if (REDUCERMEN[i]->hashlist[j]->Knxt!=NULL){
+                            Klast= Kcurrent;
+                         }
+                         else
+                         {
+                             break;
+                         }
+                         
+                         if(Klast->Knxt!= NULL)
+                         Kcurrent = Kcurrent->Knxt;
+                         else
+                         {
+                             break;
+                         }
+                         
+                    }
                     }
                     pthread_mutex_unlock(&REDUCERMEN[i]->hashlist[j]->HeaeLock);
                 }
