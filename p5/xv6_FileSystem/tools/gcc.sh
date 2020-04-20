@@ -1,0 +1,1 @@
+gcc -iquote ../include -Wall -Werror -ggdb -o xv6_fsimg_mmap xv6_fsimg_mmap.c
