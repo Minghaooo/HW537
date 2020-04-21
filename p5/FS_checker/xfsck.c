@@ -15,9 +15,9 @@
 */
 #define stat xv6_stat // avoid clash with host struct stat
 #define dirent xv6_dirent
-#include "types.h"
+//#include "types.h"
 #include "fs.h"
-#include "stat.h"
+//#include "stat.h"
 #undef stat
 #undef dirent
 
