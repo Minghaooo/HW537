@@ -69,8 +69,8 @@ int main(int argc, char *argv[]) {
     int ck9_inodes_used[ninodes];
     for (int i = 0; i < ninodes; ++ i) ck9_inodes_used[i] = 0;
 
-    int ck12_inodes_used[ninodes];
-    for (int i = 0; i < ninodes; ++ i) ck12_inodes_used[i] = 0;
+//    int ck12_inodes_used[ninodes];
+//    for (int i = 0; i < ninodes; ++ i) ck12_inodes_used[i] = 0;
 
 
     for (int i = 0; i < ninodes; ++ i){
@@ -120,22 +120,45 @@ int main(int argc, char *argv[]) {
 
     for (int i = 0; i < ninodes; ++ i){
         if(dip[i].type == 1){
-            uint temp_addr = dip[i].addrs[0];
-            struct dirent* entry = (struct dirent *)(img_ptr + temp_addr * BSIZE);
-            int j = 1;
-            while (entry[j].inum != 0){
-                ck9_inodes_used[entry[j].inum] ++;
-                j ++;
+            for (int k = 0; k < NDIRECT; ++ k){
+                if (dip[i].addrs[k] != 0){
+                    uint temp_addr = dip[i].addrs[k];
+                    struct dirent* entry = (struct dirent *)(img_ptr + temp_addr * BSIZE);
+                    for (int j = 0; j < BSIZE / sizeof(struct dirent); ++ j){
+                        if (entry[j].inum != 0 && strcmp(entry[j].name, s1) != 0 && strcmp(entry[j].name, s2) != 0)
+                            ck9_inodes_used[entry[j].inum] ++;
+                    }
+                }
             }
-            int k = 2;
-            while(entry[k].inum != 0){
-                ck12_inodes_used[entry[k].inum] ++;
-                k ++;
+            if (dip[i].addrs[NDIRECT] != 0){
+                uint* cat_indirect = (uint*) (img_ptr + BSIZE * dip[i].addrs[NDIRECT]);
+                for(int l = 0; l < BSIZE / sizeof(uint); ++ l) {
+                    if (cat_indirect[l] != 0) {
+                        struct dirent *entry = (struct dirent *) (img_ptr + cat_indirect[l] * BSIZE);
+                        for (int j = 0; j < BSIZE / sizeof(struct dirent); ++j) {
+                            if (entry[j].inum != 0 && strcmp(entry[j].name, s1) != 0 && strcmp(entry[j].name, s2) != 0)
+                                ck9_inodes_used[entry[j].inum]++;
+                        }
+
+                    }
+                }
             }
+
+
         }
     }
+//    printf("number of entries: %ld\n", dip[8].size / sizeof(struct dirent));
+
+    ck9_inodes_used[1] ++;
+
+//    for (int i = 0; i < ninodes; ++ i){
+//        printf("inum : %d,  type:  %d, ck9:  %d\n", i, dip[i].type, ck9_inodes_used[i]);
+//    }
+//    printf("size of dirent: %ld, dirent per block: %ld\n", sizeof(struct dirent), BSIZE / sizeof(struct dirent));
+
     for (int i = 0; i < ninodes; ++ i){
         if (dip[i].type > 0 && ck9_inodes_used[i] == 0){        // check 9
+//            printf("inode num: %d\n\n", i);
             fprintf(stderr, "ERROR: inode marked used but not found in a directory.\n");
             exit(1);
         }
@@ -149,8 +172,9 @@ int main(int argc, char *argv[]) {
                 exit(1);
             }
         }
+
         if(dip[i].type == 1){
-            if (ck12_inodes_used[i] > 1){                       // check 12
+            if (ck9_inodes_used[i] > 1){                       // check 12
                 fprintf(stderr, "ERROR: directory appears more than once in file system.\n");
                 exit(1);
             }
