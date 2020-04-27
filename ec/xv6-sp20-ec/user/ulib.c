@@ -4,6 +4,17 @@
 #include "user.h"
 #include "x86.h"
 
+#define PGSIZE 4096
+#define MAX_THREADS 64
+
+struct pair {
+    void *allocated;
+    void *stack;
+};
+
+static struct pair threads[MAX_THREADS];
+
+
 char*
 strcpy(char *s, char *t)
 {
@@ -103,3 +114,49 @@ memmove(void *vdst, void *vsrc, int n)
     *dst++ = *src++;
   return vdst;
 }
+
+int
+thread_create(void (*start_routine)(void*, void*), void *arg1, void *arg2)
+{
+  void *allocated, *stack;
+  int i = 0;
+
+  allocated = malloc(2*PGSIZE);
+  if (allocated == 0) {
+    return -1;
+  }
+  stack = (void *)(((uint)allocated + PGSIZE-1) & ~(PGSIZE-1));
+
+  while (threads[i].allocated != 0) {
+    ++i;
+  }
+  threads[i].allocated = allocated;
+  threads[i].stack = stack;
+
+  return clone(start_routine, arg1, arg2, stack);
+}
+
+int
+thread_join(void)
+{
+  void *allocated, *stack;
+  int pid;
+  int i = 0;
+
+  pid = join(&stack);
+  if (pid < 0) {
+    return -1;
+  }
+
+  while (threads[i].stack != stack) {
+    ++i;
+  }
+  allocated = threads[i].allocated;
+  threads[i].allocated = 0;
+  threads[i].stack = 0;
+
+  free(allocated);
+
+  return pid;
+}
+

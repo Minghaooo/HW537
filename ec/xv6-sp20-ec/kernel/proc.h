@@ -74,6 +74,13 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  char *ustack;                 //p4b
+};
+
+
+struct semaphore {
+  uint locked;  //if 0 the lock is available
+  int  count;
 };
 
 // Process memory is laid out contiguously, low addresses first:

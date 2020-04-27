@@ -9,7 +9,13 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  struct semaphore semap[NUM_SEMAPHORES];
 } ptable;
+
+struct{
+  struct spinlock semlock;
+  struct semaphore semap[NUM_SEMAPHORES];
+} semtable;
 
 static struct proc *initproc;
 
@@ -23,6 +29,11 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
+  initlock(&semtable.semlock,"semtable");
+  for(int i =0; i<NUM_SEMAPHORES; i++){
+    semtable.semap[i].count=0;
+    semtable.semap[i].locked =0;
+  }
 }
 
 // Look in the process table for an UNUSED proc.
@@ -93,7 +104,8 @@ userinit(void)
   p->tf->eflags = FL_IF;
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
-
+  p->ustack = 0;
+  
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
@@ -107,16 +119,30 @@ int
 growproc(int n)
 {
   uint sz;
+  struct proc *p;
   
+  acquire(&ptable.lock);
   sz = proc->sz;
   if(n > 0){
-    if((sz = allocuvm(proc->pgdir, sz, sz + n)) == 0)
+    if((sz = allocuvm(proc->pgdir, sz, sz + n)) == 0) {
+      release(&ptable.lock);
       return -1;
+    }
   } else if(n < 0){
-    if((sz = deallocuvm(proc->pgdir, sz, sz + n)) == 0)
+    if((sz = deallocuvm(proc->pgdir, sz, sz + n)) == 0) {
+      release(&ptable.lock);
       return -1;
+    }
   }
   proc->sz = sz;
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->pgdir == proc->pgdir){
+          p->sz = proc->sz;
+      }
+  }
+  release(&ptable.lock);
+
   switchuvm(proc);
   return 0;
 }
@@ -144,6 +170,7 @@ fork(void)
   np->sz = proc->sz;
   np->parent = proc;
   *np->tf = *proc->tf;
+  np->ustack = proc->ustack;//p4b
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -153,6 +180,52 @@ fork(void)
       np->ofile[i] = filedup(proc->ofile[i]);
   np->cwd = idup(proc->cwd);
  
+  pid = np->pid;
+  np->state = RUNNABLE;
+  safestrcpy(np->name, proc->name, sizeof(proc->name));
+  return pid;
+}
+
+// Create a new process copying p as the parent.
+// Sets up stack to return as if from system call.
+// Caller must set state of returned proc to RUNNABLE.
+int
+clone(void(*fcn)(void*, void*), void *arg1, void *arg2, void *stack)
+{
+  int i, pid;
+  struct proc *np;
+  char *stack_physical;
+
+  // Allocate process.
+  if((np = allocproc()) == 0)
+    return -1;
+
+  // Copy process state from p.
+  np->pgdir = proc->pgdir;
+  np->sz = proc->sz;
+  np->parent = proc;
+  *np->tf = *proc->tf;
+
+  // Clear %eax so that fork returns 0 in the child.
+  np->tf->eax = 0;
+
+  // Set initial esp, initial eip, initial ebp, and ustack for new process
+  np->tf->esp = (uint)stack + PGSIZE - 12;
+  np->tf->eip = (uint)fcn;
+  np->tf->ebp = 0x0;
+  np->ustack = (char *)stack;
+
+  // Push arguments and return address onto stack
+  stack_physical = uva2ka(proc->pgdir, (char *)stack);
+  *(void **)(stack_physical + PGSIZE - 4) = arg2;
+  *(void **)(stack_physical + PGSIZE - 8) = arg1;
+  *(uint *)(stack_physical + PGSIZE - 12) = 0xffffffff;
+
+  for(i = 0; i < NOFILE; i++)
+    if(proc->ofile[i])
+      np->ofile[i] = filedup(proc->ofile[i]);
+  np->cwd = idup(proc->cwd);
+
   pid = np->pid;
   np->state = RUNNABLE;
   safestrcpy(np->name, proc->name, sizeof(proc->name));
@@ -207,7 +280,7 @@ exit(void)
 int
 wait(void)
 {
-  struct proc *p;
+  struct proc *p, *p2;
   int havekids, pid;
 
   acquire(&ptable.lock);
@@ -215,15 +288,24 @@ wait(void)
     // Scan through table looking for zombie children.
     havekids = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != proc)
+      if(p->parent != proc || p->pgdir == proc->pgdir)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
         // Found one.
         pid = p->pid;
         kfree(p->kstack);
+        for (p2 = ptable.proc; p2 < &ptable.proc[NPROC]; p2++) {
+          if (p != p2 && p->pgdir == p2->pgdir) {
+            p->pgdir = 0;
+          }
+        }
         p->kstack = 0;
-        freevm(p->pgdir);
+        if (p->pgdir != 0) {
+          freevm(p->pgdir);
+          p->pgdir = 0;
+        }
+        
         p->state = UNUSED;
         p->pid = 0;
         p->parent = 0;
@@ -237,6 +319,54 @@ wait(void)
     // No point waiting if we don't have any children.
     if(!havekids || proc->killed){
       release(&ptable.lock);
+      return -1;
+    }
+    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    sleep(proc, &ptable.lock);  //DOC: wait-sleep
+  }
+}
+
+// Wait for a child process to exit and return its pid.
+// Return -1 if this process has no children.
+int
+join(void **stack)
+{
+  struct proc *p;
+  int havekids, pid;
+
+  acquire(&ptable.lock);
+  for(;;){
+    // Scan through table looking for zombie children.
+    havekids = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != proc || p->pgdir != proc->pgdir)
+        continue;
+      havekids = 1;
+      if(p->state == ZOMBIE){
+        if (p == proc) {
+          panic("proc");
+        }
+        *stack = (void *)p->ustack;
+        // Found one.
+        pid = p->pid;
+        kfree(p->kstack);
+        p->kstack = 0;
+        p->ustack = 0;
+        p->pgdir = 0;
+        p->state = UNUSED;
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+        release(&ptable.lock);
+        return pid;
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || proc->killed){
+      release(&ptable.lock);
+      *stack = NULL;
       return -1;
     }
 
@@ -281,7 +411,6 @@ scheduler(void)
       proc = 0;
     }
     release(&ptable.lock);
-
   }
 }
 
@@ -291,6 +420,7 @@ void
 sched(void)
 {
   int intena;
+ // cprintf("sched process\n");
 
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
@@ -347,11 +477,12 @@ sleep(void *chan, struct spinlock *lk)
     acquire(&ptable.lock);  //DOC: sleeplock1
     release(lk);
   }
-
+  //cprintf("go to sleep\n");
   // Go to sleep.
-  proc->chan = chan;
+  proc->chan = chan;  // remember the channel passed to us
   proc->state = SLEEPING;
-  sched();
+  sched();  // switch to the scheduler context which picks some other thread to run
+  // the next line will be executed only when the thread it woken up again 
 
   // Tidy up.
   proc->chan = 0;
@@ -370,9 +501,10 @@ wakeup1(void *chan)
 {
   struct proc *p;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) // walk all the process in the ptable 
+    // check if the process is slepign , and  is sleeping on this channel
     if(p->state == SLEEPING && p->chan == chan)
-      p->state = RUNNABLE;
+      p->state = RUNNABLE; // next time the scheduler will consider p in RR
 }
 
 // Wake up all processes sleeping on chan.
@@ -443,4 +575,68 @@ procdump(void)
   }
 }
 
+int sem_init(int *sem_id, int count){
 
+  acquire(&semtable.semlock);
+  for (int i = 0; i<NUM_SEMAPHORES; i++){
+    if(semtable.semap[i].locked == 0){
+      *sem_id = i;
+      break;
+    }
+    if ((i == NUM_SEMAPHORES - 1) && (semtable.semap[*sem_id].locked != 0))
+    {
+      return -1;
+    }
+  }
+  if(semtable.semap[*sem_id].locked == 0){
+    semtable.semap[*sem_id].count = count;
+    semtable.semap[*sem_id].locked = 0;
+  }
+  else {
+    return -1;
+    }
+
+    semtable.semap[*sem_id].locked = 1;
+  //  cprintf("this is semi %d init with count %d\n",*sem_id, semtable.semap[*sem_id].count);
+    release(&semtable.semlock);
+    return 0;
+}
+
+// decrement sem value by 1, wait if value of sem is negative
+int sem_wait(int sem_id){
+  
+  acquire(&semtable.semlock);
+
+  //cprintf("  this is sem_wait with id %d, count %d\n", sem_id, semtable.semap[sem_id].count);
+  while (semtable.semap[sem_id].count <=0 ){
+    sleep(&semtable.semap[sem_id], &semtable.semlock);
+  }
+  semtable.semap[sem_id].count--;
+  //semtable.semap[sem_id].locked = 1;
+  // cprintf("           this is sem_sleep finish with id %d, count %d\n", sem_id, semtable.semap[sem_id].count);
+  release(&semtable.semlock);
+
+  return 0;
+}
+
+// increase sem value by 1, then wake a signal waiter if exists
+int sem_post(int sem_id){
+ // cprintf("this is sem_post\n");
+  acquire(&semtable.semlock);
+  semtable.semap[sem_id].count++;
+  //semtable.semap[sem_id].locked = 0;
+ // cprintf("this is sem_post with id %d, count %d\n", sem_id, semtable.semap[sem_id].count);
+  wakeup(&semtable.semap[sem_id]);
+//wake up a signal
+  release(&semtable.semlock);
+  return 0;
+}
+
+int sem_destroy(int sem_id){
+// cprintf("this is sem_destory\n");
+  acquire(&semtable.semlock);
+  semtable.semap[sem_id].locked =0;
+  semtable.semap[sem_id].count =0;
+  release(&semtable.semlock);
+  return 0;
+}

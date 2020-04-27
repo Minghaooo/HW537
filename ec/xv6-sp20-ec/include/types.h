@@ -1,6 +1,7 @@
 #ifndef _TYPES_H_
 #define _TYPES_H_
 
+#define NUM_SEMAPHORES 32 
 // Type definitions
 
 typedef unsigned int   uint;

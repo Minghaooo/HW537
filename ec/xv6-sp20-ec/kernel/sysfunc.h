@@ -23,5 +23,11 @@ int sys_unlink(void);
 int sys_wait(void);
 int sys_write(void);
 int sys_uptime(void);
+int sys_clone(void);
+int sys_join(void);
+int sys_sem_init(void);
+int sys_sem_wait(void);
+int sys_sem_post(void);
+int sys_sem_destroy(void);
 
 #endif // _SYSFUNC_H_
