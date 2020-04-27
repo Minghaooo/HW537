@@ -25,7 +25,7 @@ const char* s2 = "..";
 
 int main(int argc, char *argv[]) {
     int fd;
-    // Usage is something like <my prog> <fs.img>
+
     if (argc == 2) {
         fd = open(argv[1], O_RDONLY);
     } else {
@@ -40,19 +40,19 @@ int main(int argc, char *argv[]) {
 
     struct stat sbuf;
     fstat(fd, &sbuf);
-//    printf("Image that i read is %ld in size\n", sbuf.st_size);
 
     void *img_ptr = mmap(NULL, sbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     struct superblock *sb = (struct superblock *) (img_ptr + BSIZE);
-//    printf("size %d nblocks %d ninodes %d\n", sb->size, sb->nblocks, sb->ninodes);
 
     int nblocks = sb->nblocks;
     int ninodes = sb->ninodes;
     int size = sb->size;
 
-
     uint bitblocks = size / (BSIZE * 8) + 1;
     uint usedblocks = ninodes / IPB + 1 + bitblocks;
+
+    int start_bit_blocks = BBLOCK(0, ninodes);
+
     if (size <= usedblocks + nblocks){
         fprintf(stderr, "ERROR: superblock is corrupted.\n");
         exit(1);
@@ -66,12 +66,11 @@ int main(int argc, char *argv[]) {
         block_used[i] = 0;
     }
 
-    int ck9_inodes_used[ninodes];
+    int ck9_inodes_used[ninodes];               // check 9 10 11 12
     for (int i = 0; i < ninodes; ++ i) ck9_inodes_used[i] = 0;
 
-//    int ck12_inodes_used[ninodes];
-//    for (int i = 0; i < ninodes; ++ i) ck12_inodes_used[i] = 0;
-
+    int parent[ninodes];
+    for (int i = 0; i < ninodes; ++ i) parent[i] = 0;
 
     for (int i = 0; i < ninodes; ++ i){
         if (dip[i].type > 3 || dip[i].type < 0){
@@ -97,17 +96,20 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "ERROR: bad indirect address in inode.\n");
                     exit(1);
                 }
+		        block_used[dip[i].addrs[NDIRECT]] ++;
                 uint* cat_indirect = (uint*) (img_ptr + BSIZE * dip[i].addrs[NDIRECT]);
                 for (int j = 0; j < BSIZE/sizeof(uint); ++j) {
                     if ((cat_indirect[j] < data_block_addr || cat_indirect[j] >= size) && cat_indirect[j] != 0){
                         fprintf(stderr, "ERROR: bad indirect address in inode.\n");
                         exit(1);
                     }
+                    if (cat_indirect[j] != 0){
+                        block_used[cat_indirect[j]] ++;
+                    }
                 }
             }
+
         }
-
-
         if (dip[i].type == 1){      // check 4
             uint temp_addr = dip[i].addrs[0];
             struct dirent* entry = (struct dirent *)(img_ptr + temp_addr * BSIZE);
@@ -118,6 +120,43 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    //check 5 6
+    for (int i = data_block_addr; i < size; ++ i){
+        int byte_num = i / 8;
+        int bit_offset = i % 8;
+        char* the_byte = (char*)(img_ptr + start_bit_blocks * BSIZE);
+        int love = *(the_byte + byte_num) & (1 << bit_offset);
+        if (love > 0 && block_used[i] == 0){                // bitmap in use but actually not
+            fprintf(stderr, "ERROR: bitmap marks block in use but it is not in use.\n");
+            exit(1);
+        }
+        if(love == 0 && block_used[i] > 0){                 // bitmap not in use but actually is in use
+            fprintf(stderr, "ERROR: address used by inode but marked free in bitmap.\n");
+            exit(1);
+        }
+    }
+
+    // check 8
+    for (int i = 0; i < ninodes; ++ i){
+        if (dip[i].type == 2){
+            int ck8_used_blocks = 0;
+            for (int j = 0; j < NDIRECT; ++ j){
+                if (dip[i].addrs[j] != 0) ck8_used_blocks ++;
+            }
+            if (dip[i].addrs[NDIRECT] != 0){
+                uint* cat_indirect = (uint*) (img_ptr + BSIZE * dip[i].addrs[NDIRECT]);
+                for (int k = 0; k < BSIZE / sizeof(uint); ++ k){
+                    if (cat_indirect[k] != 0) ck8_used_blocks ++;
+                }
+            }
+            if (! ((int)dip[i].size > (ck8_used_blocks - 1) * BSIZE && (int)dip[i].size <= ck8_used_blocks * BSIZE)){
+                fprintf(stderr, "ERROR: incorrect file size in inode.\n");
+                exit(1);
+            }
+        }
+    }
+
+    // check 9 10 11 12
     for (int i = 0; i < ninodes; ++ i){
         if(dip[i].type == 1){
             for (int k = 0; k < NDIRECT; ++ k){
@@ -147,18 +186,11 @@ int main(int argc, char *argv[]) {
 
         }
     }
-//    printf("number of entries: %ld\n", dip[8].size / sizeof(struct dirent));
-
     ck9_inodes_used[1] ++;
 
-//    for (int i = 0; i < ninodes; ++ i){
-//        printf("inum : %d,  type:  %d, ck9:  %d\n", i, dip[i].type, ck9_inodes_used[i]);
-//    }
-//    printf("size of dirent: %ld, dirent per block: %ld\n", sizeof(struct dirent), BSIZE / sizeof(struct dirent));
 
     for (int i = 0; i < ninodes; ++ i){
         if (dip[i].type > 0 && ck9_inodes_used[i] == 0){        // check 9
-//            printf("inode num: %d\n\n", i);
             fprintf(stderr, "ERROR: inode marked used but not found in a directory.\n");
             exit(1);
         }
@@ -182,38 +214,68 @@ int main(int argc, char *argv[]) {
 
     }
 
-//    for(int i = 0; i < ninodes; ++ i){
-//        if (dip[i].type == 2){       //check 8
-//            int flag = 0;
-//            int block_c = 0;
-//            for(int j = 0; j < NDIRECT; ++j) {
-//                if (dip[i].addrs[j] != 0) block_c++;
-//                else{
-//                    flag = 1;
-//                    break;
-//                }
-//            }
-//            if (flag == 1 || dip[i].addrs[NDIRECT] == 0){
-//                if (dip[i].size <= (block_c - 1) * BSIZE || dip[i].size > block_c * BSIZE){
-//                    fprintf(stderr, "ERROR: incorrect file size in inode.\n");
-//                    exit(1);
-//                }
-//            } else{
-//                uint* cat_indirect = (uint*) (img_ptr + BSIZE * dip[i].addrs[NDIRECT]);
-//                for (int j = 0; j < BSIZE/sizeof(uint); ++j) {
-//                    if (cat_indirect[j] != 0) block_c ++;
-//                    else break;
-//                }
-//                if (dip[i].size <= (block_c - 1) * BSIZE || dip[i].size > block_c * BSIZE){
-//                    fprintf(stderr, "ERROR: incorrect file size in inode.\n");
-//                    exit(1);
-//                }
-//            }
-//        }
-//    }
 
 
+    //parent
+    for (int i = 0; i < ninodes; ++ i){
+        if(dip[i].type == 1){
+            for (int k = 0; k < NDIRECT; ++ k){
+                if (dip[i].addrs[k] != 0){
+                    uint temp_addr = dip[i].addrs[k];
+                    struct dirent* entry = (struct dirent *)(img_ptr + temp_addr * BSIZE);
+                    for (int j = 0; j < BSIZE / sizeof(struct dirent); ++ j){
+                        if (entry[j].inum != 0 && strcmp(entry[j].name, s1) != 0 && strcmp(entry[j].name, s2) != 0)
+                            parent[entry[j].inum] = i;
+                    }
+                }
+            }
+            if (dip[i].addrs[NDIRECT] != 0){
+                uint* cat_indirect = (uint*) (img_ptr + BSIZE * dip[i].addrs[NDIRECT]);
+                for(int l = 0; l < BSIZE / sizeof(uint); ++ l) {
+                    if (cat_indirect[l] != 0) {
+                        struct dirent *entry = (struct dirent *) (img_ptr + cat_indirect[l] * BSIZE);
+                        for (int j = 0; j < BSIZE / sizeof(struct dirent); ++j) {
+                            if (entry[j].inum != 0 && strcmp(entry[j].name, s1) != 0 && strcmp(entry[j].name, s2) != 0)
+                                parent[entry[j].inum] = i;
+                        }
 
+                    }
+                }
+            }
+
+
+        }
+    }
+
+    parent[1] = 1;
+
+    //ex 1
+    for (int i = 0; i < ninodes; ++ i){
+        if (dip[i].type == 1){
+            uint temp_addr = dip[i].addrs[0];
+            struct dirent* entry = (struct dirent *)(img_ptr + temp_addr * BSIZE);
+            if (entry[1].inum != parent[i]){
+                fprintf(stderr, "ERROR: parent directory mismatch.\n");
+                exit(1);
+            }
+        }
+    }
+
+    //ex 2
+    int trace_path[ninodes];
+    for (int i = 0; i < ninodes; ++ i){
+        if (dip[i].type == 1){
+            for (int j = 0; j < ninodes; ++ j) trace_path[j] = 0;
+            int p = i;
+            while(p != 1){
+                if( ++ trace_path[p] > 1) {         // a loop
+                    fprintf(stderr, "ERROR: inaccessible directory exists.\n");
+                    exit(1);
+                }
+                p = parent[p];
+            }
+        }
+    }
 
 
 
